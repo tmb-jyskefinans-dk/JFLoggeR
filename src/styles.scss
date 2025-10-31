@@ -1,1 +1,16 @@
-/* You can add global styles to this file, and also import other style files */
+@use "tailwindcss";
+
+/* Global styles (Tailwind utilities only; component-level @apply disabled due to build pipeline limits) */
+
+/* Input icon normalization: ensure any inline SVG or icon element inside an input wrapper inherits text color */
+/* Usage pattern: wrap input + icon in a flex container with text color utilities; icons get currentColor automatically */
+input svg, .input svg, .form-field svg, .input-icon svg, .input-icon i, .input-icon .icon {
+	color: inherit;
+	fill: currentColor;
+	stroke: currentColor;
+}
+/* Provide size helpers if developer adds class 'icon-sm' or 'icon-md' */
+.icon-sm { width: 0.875rem; height: 0.875rem; }
+.icon-md { width: 1rem; height: 1rem; }
+
+

@@ -1,12 +1,26 @@
-import { Component, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { Component, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { RouterLink, RouterOutlet } from '@angular/router';
+import { IpcService } from './services/ipc.service';
+import { ClockService } from './services/clock.service';
+import { LogDialogComponent } from './components/log-dialog/log-dialog.component';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet],
-  templateUrl: './app.html',
-  styleUrl: './app.scss'
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RouterLink, RouterOutlet, LogDialogComponent],
+  templateUrl: "./app.component.html",
+  styleUrls: []
 })
-export class App {
-  protected readonly title = signal('work-logger');
+export class AppComponent {
+  ipc = inject(IpcService);
+  clock = inject(ClockService);
+  today = this.clock.today;
+  dialogOpen = signal(false);
+  pendingCount = signal(0);
+
+  constructor() {
+    effect(() => this.pendingCount.set(this.ipc.pendingSlots().length));
+  }
+
+  openDialog() { this.dialogOpen.set(true); }
 }
