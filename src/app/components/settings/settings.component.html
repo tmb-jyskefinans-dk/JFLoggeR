@@ -1,12 +1,12 @@
 <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 shadow-sm p-6 max-w-4xl mx-auto text-slate-700 dark:text-slate-200">
   <div class="flex items-start justify-between mb-6">
     <div class="space-y-1">
-      <h2 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Settings</h2>
-      <p class="text-xs text-slate-500 dark:text-slate-400">Configure working hours, slot granularity and active weekdays</p>
+  <h2 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Indstillinger</h2>
+  <p class="text-xs text-slate-500 dark:text-slate-400">Konfigurer arbejdstider, intervalstørrelse og aktive ugedage</p>
     </div>
     <div class="flex gap-2">
-      <button type="button" (click)="reset()" [disabled]="!changed()" class="inline-flex items-center justify-center rounded-md text-sm font-medium px-3 h-9 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">Reset</button>
-      <button type="button" (click)="save()" [disabled]="!changed()" class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-9 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">Save</button>
+  <button type="button" (click)="reset()" [disabled]="!changed()" class="inline-flex items-center justify-center rounded-md text-sm font-medium px-3 h-9 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">Nulstil</button>
+  <button type="button" (click)="save()" [disabled]="!changed()" class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-9 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">Gem</button>
     </div>
   </div>
 
@@ -22,23 +22,23 @@
   } @else {
     <form class="grid grid-cols-1 md:grid-cols-3 gap-5" novalidate>
       <div class="flex flex-col gap-1">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Work start</label>
+  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde start</label>
         <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [(ngModel)]="work_start" name="work_start" required>
       </div>
       <div class="flex flex-col gap-1">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Work end</label>
+  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde slut</label>
         <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [(ngModel)]="work_end" name="work_end" required>
       </div>
       <div class="flex flex-col gap-1">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Slot minutes</label>
+  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Intervallængde (minutter)</label>
         <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" [(ngModel)]="slot_minutes" name="slot_minutes" required>
           @for(m of [5,10,15,20,30,60]; track m) { <option [value]="m">{{m}}</option> }
         </select>
       </div>
 
       <div class="md:col-span-3 flex flex-col gap-2 mt-2">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Enabled weekdays</label>
-        <div class="flex flex-wrap gap-2" role="group" aria-label="Enabled weekdays">
+  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Aktive ugedage</label>
+  <div class="flex flex-wrap gap-2" role="group" aria-label="Aktive ugedage">
           @for(d of days; track d; let i = $index;) {
             <button type="button" (click)="weekdayState[i]=!weekdayState[i]" [attr.aria-pressed]="weekdayState[i]"
               class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
@@ -51,7 +51,7 @@
 
       <div class="md:col-span-3 mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        {{totalWorkMinutes()}} minutes scheduled window • approx {{ (totalWorkMinutes()/60) | number:'1.2-2' }} hours
+  {{totalWorkMinutes()}} minutter planlagt vindue • ca. {{ (totalWorkMinutes()/60) | number:'1.2-2' }} timer
       </div>
     </form>
   }

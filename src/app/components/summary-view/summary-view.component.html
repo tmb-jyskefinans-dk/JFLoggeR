@@ -1,27 +1,27 @@
 <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-6 text-slate-700 dark:text-slate-200">
   <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100 flex items-center gap-2">
-    <span>Summary for</span>
+  <span>Opsummering for</span>
     <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200 text-sm font-medium" aria-label="Selected day">{{day()}}</span>
   </h2>
   <div class="overflow-auto mt-4">
     <table class="min-w-full text-sm" aria-describedby="summaryTotals" aria-label="Work slot summary table">
-      <caption class="text-left text-sm text-slate-500 dark:text-slate-400 mb-2">Aggregated work slot summary for {{day()}}</caption>
+  <caption class="text-left text-sm text-slate-500 dark:text-slate-400 mb-2">Samlet oversigt over arbejdsslots for {{day()}}</caption>
       <thead class="text-slate-600 dark:text-slate-300">
         <tr>
-          <th scope="col" class="text-left py-2">Description</th>
-          <th scope="col" class="text-left">Category</th>
-          <th scope="col" class="text-left">Slots</th>
-          <th scope="col" class="text-left">Minutes</th>
+          <th scope="col" class="text-left py-2">Beskrivelse</th>
+          <th scope="col" class="text-left">Kategori</th>
+          <th scope="col" class="text-left">Intervaller</th>
+          <th scope="col" class="text-left">Minutter</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
         @if(loading()) {
           @for(i of [1,2,3,4]; track i) {
             <tr>
-              <td class="py-2"><div class="h-4 w-40 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Loading description…</span></td>
-              <td><div class="h-4 w-24 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Loading category…</span></td>
-              <td><div class="h-4 w-10 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Loading slots…</span></td>
-              <td><div class="h-4 w-14 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Loading minutes…</span></td>
+              <td class="py-2"><div class="h-4 w-40 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Indlæser beskrivelse…</span></td>
+              <td><div class="h-4 w-24 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Indlæser kategori…</span></td>
+              <td><div class="h-4 w-10 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Indlæser intervaller…</span></td>
+              <td><div class="h-4 w-14 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" aria-hidden="true"></div><span class="sr-only">Indlæser minutter…</span></td>
             </tr>
           }
         } @else {
@@ -38,7 +38,7 @@
       @if(rows().length) {
         <tfoot class="text-slate-700 dark:text-slate-200">
           <tr id="summaryTotals" class="border-t border-slate-300 dark:border-slate-600">
-            <th scope="row" class="py-2 font-semibold text-left" colspan="2">Totals</th>
+            <th scope="row" class="py-2 font-semibold text-left" colspan="2">Totaler</th>
             <td class="font-semibold">{{totalSlots()}}</td>
             <td class="font-semibold">{{totalMinutes()}}</td>
           </tr>
@@ -49,7 +49,7 @@
   @if(!loading() && !rows().length) {
     <div class="mt-6 text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2" role="status" aria-live="polite">
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      No summary entries yet for this day.
+  Ingen opsummeringsposter endnu for denne dag.
     </div>
   }
 </div>

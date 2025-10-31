@@ -3,15 +3,15 @@
     class="w-[680px] max-w-[90vw] md:w-[760px] rounded-xl border border-slate-200 dark:border-slate-600 shadow-xl bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 p-0 text-slate-700 dark:text-slate-200 flex flex-col gap-6">
     <header class="flex items-start justify-between px-6 py-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-t-xl">
       <div class="space-y-1">
-        <h2 id="logDialogTitle" class="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Log Time</h2>
-        <p class="text-xs text-slate-500 dark:text-slate-400">Capture work performed in discrete time slots</p>
+  <h2 id="logDialogTitle" class="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Registrér tid</h2>
+  <p class="text-xs text-slate-500 dark:text-slate-400">Registrér arbejde udført i tidsintervaller</p>
       </div>
       <button type="button" (click)="closed.emit()" aria-label="Close"
         class="text-xl leading-none px-2 py-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition">×</button>
     </header>
 
     <section class="px-6">
-      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Pending Slots</h3>
+  <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Ikke registrerede intervaller</h3>
       <div class="flex flex-wrap gap-2 mb-1" role="listbox" aria-label="Available slots">
         @for(s of allSlots(); track s) {
           <button type="button"
@@ -33,14 +33,14 @@
           </button>
         }
       </div>
-      <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Click to toggle. Selected slots show a check and ring.</p>
+  <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Klik for at vælge/fravælge. Valgte intervaller viser et hak og en markering.</p>
     </section>
 
     <section class="px-6">
-      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Reuse Recent</h3>
+  <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Genbrug seneste</h3>
       <select (change)="applyPreset($any($event.target).value)"
         class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 mb-1">
-        <option value="">Choose previous entry…</option>
+  <option value="">Vælg tidligere registrering…</option>
         @for(r of recent(); track r) {
           <option [value]="r.description+'||'+r.category">
             {{r.description}} — {{r.category}} ({{r.uses}})
@@ -51,12 +51,12 @@
 
     <section class="px-6 grid grid-cols-1 md:grid-cols-2 gap-4">
       <div class="flex flex-col gap-1">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Description</label>
-        <input #descInput [(ngModel)]="description" name="description" required placeholder="e.g. Monthly reporting"
+  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Beskrivelse</label>
+  <input #descInput [(ngModel)]="description" name="description" required placeholder="fx. Månedlig rapportering"
           class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
       </div>
       <div class="flex flex-col gap-1">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Category</label>
+  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Kategori</label>
         <select [(ngModel)]="category" name="category" required
           class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition">
           <option value="" disabled>Vælg kategori…</option>
@@ -77,9 +77,9 @@
     <footer class="px-6 pb-6 pt-2">
       <div class="flex gap-3 justify-end w-full">
         <button type="button" (click)="closed.emit()"
-          class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition">Cancel</button>
+          class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition">Annuller</button>
         <button type="submit" [disabled]="selectedSlots().length===0 || !description || !category"
-          class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition">Save Entry</button>
+          class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition">Gem registrering</button>
       </div>
     </footer>
   </form>
