@@ -23,15 +23,15 @@
     <form class="grid grid-cols-1 md:grid-cols-3 gap-5" novalidate>
       <div class="flex flex-col gap-1">
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde start</label>
-        <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [(ngModel)]="work_start" name="work_start" required>
+  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [ngModel]="workStart()" (ngModelChange)="workStart.set($event)" name="work_start" required>
       </div>
       <div class="flex flex-col gap-1">
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde slut</label>
-        <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [(ngModel)]="work_end" name="work_end" required>
+  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [ngModel]="workEnd()" (ngModelChange)="workEnd.set($event)" name="work_end" required>
       </div>
       <div class="flex flex-col gap-1">
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Intervallængde (minutter)</label>
-        <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" [(ngModel)]="slot_minutes" name="slot_minutes" required>
+  <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" [ngModel]="slotMinutes()" (ngModelChange)="slotMinutes.set($event)" name="slot_minutes" required>
           @for(m of [5,10,15,20,30,60]; track m) { <option [value]="m">{{m}}</option> }
         </select>
       </div>
@@ -40,9 +40,9 @@
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Aktive ugedage</label>
   <div class="flex flex-wrap gap-2" role="group" aria-label="Aktive ugedage">
           @for(d of days; track d; let i = $index;) {
-            <button type="button" (click)="weekdayState[i]=!weekdayState[i]" [attr.aria-pressed]="weekdayState[i]"
+            <button type="button" (click)="toggleWeekday(i)" [attr.aria-pressed]="weekdayState()[i]"
               class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-              [class]="weekdayState[i] ? 'border-indigo-600 bg-indigo-600 text-white dark:bg-indigo-500 dark:border-indigo-500' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-400 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
+              [class]="weekdayState()[i] ? 'border-indigo-600 bg-indigo-600 text-white dark:bg-indigo-500 dark:border-indigo-500' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-400 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
               {{d}}
             </button>
           }

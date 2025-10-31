@@ -18,6 +18,8 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     onPrompt: (cb) => electron_1.ipcRenderer.on('prompt:open', (_e, d) => cb(d)),
     onFocus: (cb) => electron_1.ipcRenderer.on('app:focus', cb),
     onAppReady: (cb) => electron_1.ipcRenderer.once('app:ready', cb),
+    // Queue update event (pending slots rebuilt)
+    onQueueUpdated: (cb) => electron_1.ipcRenderer.on('queue:updated', cb),
     // Debug notification trigger
     sendTestNotification: (body) => electron_1.ipcRenderer.invoke('debug:notify', { body })
 });

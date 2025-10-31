@@ -37,7 +37,9 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   ngOnInit() {
     const list = this.ipc.pendingSlots();
     this.selectedSlots.set(list.slice(0, 1));
-    if (!this.recent().length) this.ipc.loadRecent();
+    if (!this.recent().length) {
+      this.ipc.loadRecent();
+    }
   }
 
   ngAfterViewInit() {

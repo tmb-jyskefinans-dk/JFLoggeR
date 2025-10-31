@@ -10,8 +10,8 @@ let win = null;
 const pending = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 function createWindow() {
     win = new electron_1.BrowserWindow({
-        width: 1100,
-        height: 720,
+        width: 1380,
+        height: 860,
         show: false,
         webPreferences: {
             // IMPORTANT: when compiled, __dirname points to electron/.dist
@@ -55,18 +55,24 @@ function notifyForSlot(slot) {
 function scheduleTicker() {
     const now = new Date();
     let next = (0, time_1.nextQuarter)(now);
-    // Align to working hours: if before 08:00, jump to 08:00; after 16:00, jump to next day 08:00
+    // Use dynamic working hours from settings instead of hardcoded 08:00–16:00
+    const s = (0, db_1.getSettings)();
+    const { h: sh, m: sm } = (0, time_1.parseHM)(s.work_start);
+    const { h: eh, m: em } = (0, time_1.parseHM)(s.work_end);
     const start = new Date(now);
-    start.setHours(8, 0, 0, 0);
+    start.setHours(sh, sm, 0, 0);
     const end = new Date(now);
-    end.setHours(16, 0, 0, 0);
-    if (now < start)
+    end.setHours(eh, em, 0, 0);
+    if (now < start) {
         next = start;
-    if (now >= end) {
-        // move to next workday 08:00
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(8, 0, 0, 0);
+    }
+    else if (now >= end) {
+        // Move to next enabled workday start. If next day is disabled, advance until enabled.
+        let tomorrow = new Date(now);
+        do {
+            tomorrow.setDate(tomorrow.getDate() + 1);
+        } while (!(0, time_1.isWorkTime)(new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), sh, sm)) && !isFinite(sh));
+        tomorrow.setHours(sh, sm, 0, 0);
         next = tomorrow;
     }
     const tick = () => {
@@ -74,27 +80,47 @@ function scheduleTicker() {
         if ((0, time_1.isWorkTime)(when)) {
             const slot = (0, time_1.currentSlotStart)(when);
             const key = (0, time_1.slotKey)(slot);
-            pending.add(key); // stack
+            pending.add(key);
             notifyForSlot(slot);
         }
-        // schedule next quarter
+        // Re-schedule using up-to-date slot length and settings
         const n = (0, time_1.nextQuarter)(new Date());
         setTimeout(tick, n.getTime() - Date.now());
     };
     setTimeout(tick, next.getTime() - Date.now());
 }
-function rebuildBacklogForToday() {
-    // At app start, populate pending with any missing slots from today
-    const today = new Date();
-    // If it's outside work time at startup, we can still build backlog for today safely.
-    const day = (0, time_1.toLocalDateYMD)(today);
-    const slots = (0, time_1.daySlots)(today).map((s) => (0, time_1.slotKey)(s));
+function rebuildBacklogForToday({ includeFuture = false } = {}) {
+    // Build backlog only for past (and optionally current) unlogged slots.
+    const now = new Date();
+    const day = (0, time_1.toLocalDateYMD)(now);
     const done = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
     pending.clear();
-    slots.forEach((k) => {
-        if (!done.has(k))
-            pending.add(k);
-    });
+    for (const slot of (0, time_1.daySlots)(now)) {
+        if (!includeFuture && slot.getTime() >= now.getTime())
+            break; // stop at first future slot
+        const key = (0, time_1.slotKey)(slot);
+        if (!done.has(key))
+            pending.add(key);
+    }
+}
+// Rebuild pending queue when settings change. By default only future (>= now) slots are queued
+// to avoid flooding the user with historical prompts after a granularity change.
+function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
+    const now = new Date();
+    const day = (0, time_1.toLocalDateYMD)(now);
+    const existing = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
+    pending.clear();
+    for (const slot of (0, time_1.daySlots)(now)) {
+        const key = (0, time_1.slotKey)(slot);
+        if (existing.has(key))
+            continue; // already logged
+        if (!includeFuture && slot.getTime() >= now.getTime())
+            break; // stop adding at first future slot
+        if (!doneOrLogged(key))
+            pending.add(key);
+    }
+    win?.webContents.send('queue:updated');
+    function doneOrLogged(key) { return existing.has(key); }
 }
 // IPC handlers
 console.log('[main] registering IPC handlers...');
@@ -105,7 +131,12 @@ electron_1.ipcMain.handle('db:get-summary', (_e, day) => (0, db_1.getSummary)(da
 electron_1.ipcMain.handle('db:get-recent', (_e, limit) => (0, db_1.getDistinctRecent)(limit ?? 20));
 // Settings handlers (missing previously)
 electron_1.ipcMain.handle('db:get-settings', () => { const s = (0, db_1.getSettings)(); return s; });
-electron_1.ipcMain.handle('db:save-settings', (_e, s) => { (0, db_1.saveSettings)(s); return { ok: true, settings: (0, db_1.getSettings)() }; });
+electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
+    (0, db_1.saveSettings)(s);
+    // Recalculate backlog for already elapsed slots only; future slots will be added by the ticker.
+    rebuildPendingAfterSettingsChange({ includeFuture: false });
+    return { ok: true, settings: (0, db_1.getSettings)() };
+});
 electron_1.ipcMain.handle('queue:get', () => Array.from(pending).sort());
 electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
     const groupedByDay = new Map();
@@ -149,7 +180,7 @@ electron_1.app.whenReady().then(() => {
     console.log('[main] creating main window...');
     createWindow();
     console.log('[main] rebuilding backlog for today...');
-    rebuildBacklogForToday();
+    rebuildBacklogForToday({ includeFuture: false });
     console.log('[main] scheduling ticker for notifications...');
     scheduleTicker();
     console.log('[main] initialization complete.');

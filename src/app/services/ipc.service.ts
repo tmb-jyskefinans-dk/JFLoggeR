@@ -16,6 +16,7 @@ declare global {
   onFocus(cb: () => void): void;
   onAppReady?: (cb: () => void) => void;
   sendTestNotification?(body?: string): Promise<{ ok: boolean }>;
+  onQueueUpdated?(cb: () => void): void;
     }
   }
 }
@@ -45,6 +46,7 @@ export class IpcService {
       window.workApi.onAppReady?.(() => {
         if (!this.settings()) this.loadSettings();
       });
+      window.workApi.onQueueUpdated?.(() => this.loadPending());
     } catch { /* ignore */ }
   }
 
@@ -61,8 +63,6 @@ export class IpcService {
   loadRecent() { window.workApi.getRecent(20).then(this.recent.set); }
   loadPending() { window.workApi.getPendingSlots().then(this.pendingSlots.set); }
   loadSettings() {
-    console.log(window.workApi.getSettings());
-
     window.workApi.getSettings()
       .then(this.settings.set)
       .catch(err => {
@@ -81,6 +81,8 @@ export class IpcService {
         // If main returns updated settings object, prefer that; otherwise reload
         if (resp && resp.settings) this.settings.set(resp.settings);
         else this.loadSettings();
+        // Refresh pending slots after settings change (interval/hours may alter backlog)
+        this.loadPending();
       })
       .catch(err => console.error('[ipc] saveSettings failed', err));
   }

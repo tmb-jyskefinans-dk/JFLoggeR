@@ -20,7 +20,8 @@ import {
   slotKey,
   daySlots,
   toLocalDateYMD,
-  getSlotMinutes
+  getSlotMinutes,
+  parseHM
 } from './time';
 
 let win: BrowserWindow | null = null;
@@ -28,8 +29,8 @@ const pending: Set<string> = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1100,
-    height: 720,
+    width: 1380,
+    height: 860,
     show: false,
     webPreferences: {
       // IMPORTANT: when compiled, __dirname points to electron/.dist
@@ -79,18 +80,23 @@ function scheduleTicker() {
   const now = new Date();
   let next = nextQuarter(now);
 
-  // Align to working hours: if before 08:00, jump to 08:00; after 16:00, jump to next day 08:00
-  const start = new Date(now);
-  start.setHours(8, 0, 0, 0);
-  const end = new Date(now);
-  end.setHours(16, 0, 0, 0);
+  // Use dynamic working hours from settings instead of hardcoded 08:00–16:00
+  const s = getSettings();
+  const { h: sh, m: sm } = parseHM(s.work_start);
+  const { h: eh, m: em } = parseHM(s.work_end);
 
-  if (now < start) next = start;
-  if (now >= end) {
-    // move to next workday 08:00
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(8, 0, 0, 0);
+  const start = new Date(now); start.setHours(sh, sm, 0, 0);
+  const end   = new Date(now); end.setHours(eh, em, 0, 0);
+
+  if (now < start) {
+    next = start;
+  } else if (now >= end) {
+    // Move to next enabled workday start. If next day is disabled, advance until enabled.
+    let tomorrow = new Date(now);
+    do {
+      tomorrow.setDate(tomorrow.getDate() + 1);
+    } while (!isWorkTime(new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), sh, sm)) && !isFinite(sh));
+    tomorrow.setHours(sh, sm, 0, 0);
     next = tomorrow;
   }
 
@@ -99,10 +105,10 @@ function scheduleTicker() {
     if (isWorkTime(when)) {
       const slot = currentSlotStart(when);
       const key = slotKey(slot);
-      pending.add(key); // stack
+      pending.add(key);
       notifyForSlot(slot);
     }
-    // schedule next quarter
+    // Re-schedule using up-to-date slot length and settings
     const n = nextQuarter(new Date());
     setTimeout(tick, n.getTime() - Date.now());
   };
@@ -110,19 +116,34 @@ function scheduleTicker() {
   setTimeout(tick, next.getTime() - Date.now());
 }
 
-function rebuildBacklogForToday() {
-  // At app start, populate pending with any missing slots from today
-  const today = new Date();
-  // If it's outside work time at startup, we can still build backlog for today safely.
-  const day = toLocalDateYMD(today);
-  const slots = daySlots(today).map((s) => slotKey(s));
-  const done = new Set(
-    getDayEntries(day).map((e: any) => `${e.day}T${e.start}`)
-  );
+function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boolean } = {}) {
+  // Build backlog only for past (and optionally current) unlogged slots.
+  const now = new Date();
+  const day = toLocalDateYMD(now);
+  const done = new Set(getDayEntries(day).map((e: any) => `${e.day}T${e.start}`));
   pending.clear();
-  slots.forEach((k) => {
-    if (!done.has(k)) pending.add(k);
-  });
+  for (const slot of daySlots(now)) {
+    if (!includeFuture && slot.getTime() >= now.getTime()) break; // stop at first future slot
+    const key = slotKey(slot);
+    if (!done.has(key)) pending.add(key);
+  }
+}
+
+// Rebuild pending queue when settings change. By default only future (>= now) slots are queued
+// to avoid flooding the user with historical prompts after a granularity change.
+function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeFuture?: boolean } = {}) {
+  const now = new Date();
+  const day = toLocalDateYMD(now);
+  const existing = new Set(getDayEntries(day).map((e: any) => `${e.day}T${e.start}`));
+  pending.clear();
+  for (const slot of daySlots(now)) {
+    const key = slotKey(slot);
+    if (existing.has(key)) continue; // already logged
+    if (!includeFuture && slot.getTime() >= now.getTime()) break; // stop adding at first future slot
+    if (!doneOrLogged(key)) pending.add(key);
+  }
+  win?.webContents.send('queue:updated');
+  function doneOrLogged(key: string) { return existing.has(key); }
 }
 
 // IPC handlers
@@ -136,7 +157,12 @@ ipcMain.handle('db:get-recent', (_e, limit?: number) =>
 );
 // Settings handlers (missing previously)
 ipcMain.handle('db:get-settings', () => { const s = getSettings(); return s; });
-ipcMain.handle('db:save-settings', (_e, s) => { saveSettings(s); return { ok: true, settings: getSettings() }; });
+ipcMain.handle('db:save-settings', (_e, s) => {
+  saveSettings(s);
+  // Recalculate backlog for already elapsed slots only; future slots will be added by the ticker.
+  rebuildPendingAfterSettingsChange({ includeFuture: false });
+  return { ok: true, settings: getSettings() };
+});
 
 
 ipcMain.handle('queue:get', () => Array.from(pending).sort());
@@ -192,7 +218,7 @@ app.whenReady().then(() => {
   console.log('[main] creating main window...');
   createWindow();
   console.log('[main] rebuilding backlog for today...');
-  rebuildBacklogForToday();
+  rebuildBacklogForToday({ includeFuture: false });
   console.log('[main] scheduling ticker for notifications...');
   scheduleTicker();
   console.log('[main] initialization complete.');

@@ -35,6 +35,7 @@ function initDb() {
     if (!fs.existsSync(dir))
         fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, '/worklogger.json');
+    console.log("DB file path:", file);
     if (!fs.existsSync(file))
         fs.writeFileSync(file, JSON.stringify({}));
     const seed = { entries: [], settings: DEFAULT_SETTINGS, _seq: 1 };

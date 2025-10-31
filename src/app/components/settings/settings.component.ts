@@ -13,30 +13,35 @@ import { FormsModule } from '@angular/forms';
 export class SettingsComponent {
   ipc = inject(IpcService);
 
-  work_start = '08:00';
-  work_end = '16:00';
-  slot_minutes = 15;
+  // Signals replacing primitive fields
+  workStart = signal<string>('08:00');
+  workEnd = signal<string>('16:00');
+  slotMinutes = signal<number>(15);
+  weekdayState = signal<boolean[]>([false, true, true, true, true, true, false]);
 
   days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  weekdayState = [false,true,true,true,true,true,false];
   initialSettings = signal<any|null>(null);
 
   // Derived signals
   totalWorkMinutes = computed(() => {
-    const startParts = this.work_start.split(':').map(Number);
-    const endParts = this.work_end.split(':').map(Number);
+    const startParts = this.workStart().split(':').map(Number);
+    const endParts = this.workEnd().split(':').map(Number);
     if (startParts.length < 2 || endParts.length < 2) return 0;
     const startM = startParts[0]*60 + startParts[1];
     const endM = endParts[0]*60 + endParts[1];
     return endM > startM ? (endM - startM) : 0;
   });
 
+  // Computed change detection based on signals
   changed = computed(() => {
     const s = this.initialSettings();
     if (!s) return false;
     const maskOrig = s.weekdays_mask;
-    const maskNow = this.weekdayState.reduce((acc,on,i)=> on? acc | (1<<i): acc,0);
-    return s.work_start !== this.work_start || s.work_end !== this.work_end || s.slot_minutes !== this.slot_minutes || maskOrig !== maskNow;
+    const maskNow = this.weekdayState().reduce((acc,on,i)=> on? acc | (1<<i): acc,0);
+    return s.work_start !== this.workStart() ||
+           s.work_end !== this.workEnd() ||
+           s.slot_minutes !== this.slotMinutes() ||
+           maskOrig !== maskNow;
   });
 
   constructor() {
@@ -50,31 +55,35 @@ export class SettingsComponent {
   }
 
   apply(s: any) {
-    this.work_start = s.work_start;
-    this.work_end = s.work_end;
-    this.slot_minutes = s.slot_minutes;
-    this.weekdayState = Array.from({length:7},(_,i)=> (s.weekdays_mask & (1<<i))!==0);
+    this.workStart.set(s.work_start);
+    this.workEnd.set(s.work_end);
+    this.slotMinutes.set(s.slot_minutes);
+    this.weekdayState.set(Array.from({length:7},(_,i)=> (s.weekdays_mask & (1<<i))!==0));
   }
 
   save() {
-    const weekdays_mask = this.weekdayState.reduce((acc, on, i)=> on? acc | (1<<i): acc, 0);
-    this.ipc.saveSettings({
-      work_start: this.work_start,
-      work_end: this.work_end,
-      slot_minutes: Number(this.slot_minutes),
+    const weekdays_mask = this.weekdayState().reduce((acc, on, i)=> on? acc | (1<<i): acc, 0);
+    const payload = {
+      work_start: this.workStart(),
+      work_end: this.workEnd(),
+      slot_minutes: Number(this.slotMinutes()),
       weekdays_mask
-    });
+    };
+    this.ipc.saveSettings(payload);
     // Update baseline after save for change detection
-    this.initialSettings.set({
-      work_start: this.work_start,
-      work_end: this.work_end,
-      slot_minutes: Number(this.slot_minutes),
-      weekdays_mask
-    });
+    this.initialSettings.set(payload);
   }
 
   reset() {
     const s = this.initialSettings();
     if (s) this.apply(s);
+  }
+
+  toggleWeekday(i: number) {
+    this.weekdayState.update(arr => {
+      const copy = [...arr];
+      copy[i] = !copy[i];
+      return copy;
+    });
   }
 }

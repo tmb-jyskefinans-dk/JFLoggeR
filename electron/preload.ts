@@ -19,8 +19,9 @@ contextBridge.exposeInMainWorld('workApi', {
   // Events from main (notifications clicked)
   onPrompt: (cb: (d: any) => void) => ipcRenderer.on('prompt:open', (_e, d) => cb(d)),
   onFocus: (cb: () => void) => ipcRenderer.on('app:focus', cb),
-  onAppReady: (cb: () => void) => ipcRenderer.once('app:ready', cb)
-  ,
+  onAppReady: (cb: () => void) => ipcRenderer.once('app:ready', cb),
+  // Queue update event (pending slots rebuilt)
+  onQueueUpdated: (cb: () => void) => ipcRenderer.on('queue:updated', cb),
   // Debug notification trigger
   sendTestNotification: (body?: string) => ipcRenderer.invoke('debug:notify', { body })
 });

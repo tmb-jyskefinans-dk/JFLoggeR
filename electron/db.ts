@@ -49,6 +49,7 @@ export function initDb() {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const file = path.join(dir, '/worklogger.json');
+  console.log("DB file path:", file);
 
   if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify({}));
 
