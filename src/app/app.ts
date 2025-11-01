@@ -24,8 +24,7 @@ export class AppComponent {
 
   constructor() {
     effect(() => this.pendingCount.set(this.ipc.pendingSlots().length));
-    // Apply theme class to <html> for Tailwind dark: variants
-    // pending count effect retained; theme handled by ThemeService
+
     // Open log dialog automatically when a prompt arrives (if not already open)
     effect(() => {
       const slot = this.ipc.lastPromptSlot();
@@ -39,5 +38,4 @@ export class AppComponent {
   }
 
   openDialog() { this.dialogOpen.set(true); }
-  toggleTheme() { this.theme.cycle(); }
 }

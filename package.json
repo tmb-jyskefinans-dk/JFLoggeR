@@ -1,7 +1,10 @@
 {
   "name": "work-logger",
   "version": "1.0.0",
-  "main": "electron/main.js",
+  "description": "Work Logger desktop app for tracking daily work activities",
+  "author": "JD0060",
+  "main": "electron/.dist/main.js",
+  "private": true,
   "scripts": {
     "ng": "ng",
     "serve:renderer": "ng serve",
@@ -12,11 +15,24 @@
     "dev": "npm run build:main && concurrently -k \"npm run watch:main\" \"npm run serve:renderer\" \"npm run watch:electron\"",
     "clean": "rimraf dist electron/.dist",
     "build": "npm run build:renderer && npm run build:main",
-    "release": "npm run clean && npm run build && electron-builder",
+    "make": "npm run clean && npm run build && electron-forge make",
+    "release": "npm run make",
+    "make:win": "npm run clean && npm run build && electron-forge make --platform=win32",
+    "make:mac": "npm run clean && npm run build && electron-forge make --platform=darwin",
+    "make:linux": "npm run clean && npm run build && electron-forge make --platform=linux",
     "electron:run:prod": "npm run build && electron ./electron/.dist/main.js",
     "electron:run:dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:4200 electron ./electron/.dist/main.js",
     "start": "npm run dev",
     "test:unit": "jest"
+  },
+  "build": {
+    "appId": "com.jyskefinans.worklogger",
+    "productName": "Work Logger",
+    "files": [
+      "dist/work-logger/**",
+      "electron/**",
+      "!electron/**/*.ts"
+    ]
   },
   "prettier": {
     "printWidth": 100,
@@ -24,13 +40,10 @@
     "overrides": [
       {
         "files": "*.html",
-        "options": {
-          "parser": "angular"
-        }
+        "options": { "parser": "angular" }
       }
     ]
   },
-  "private": true,
   "dependencies": {
     "@angular/common": "^20.3.0",
     "@angular/compiler": "^20.3.0",
@@ -57,7 +70,10 @@
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
     "electron": "^39.0.0",
-    "electron-builder": "^26.0.12",
+    "@electron-forge/cli": "^7.5.0",
+    "@electron-forge/maker-squirrel": "^7.5.0",
+    "@electron-forge/maker-zip": "^7.5.0",
+    "@electron-forge/maker-dmg": "^7.5.0",
     "jasmine-core": "~5.9.0",
     "jest": "^30.2.0",
     "karma": "~6.4.0",
@@ -70,28 +86,5 @@
     "ts-jest": "^29.4.5",
     "typescript": "~5.9.2",
     "wait-on": "^8.0.5"
-  },
-  "build": {
-    "appId": "com.jyskefinans.worklogger",
-    "productName": "Work Logger",
-    "files": [
-      "dist/work-logger/**",
-      "electron/**",
-      "!electron/**/*.ts"
-    ],
-    "extraResources": [],
-    "directories": {
-      "buildResources": "build"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    },
-    "mac": {
-      "target": [
-        "dmg"
-      ]
-    }
   }
 }

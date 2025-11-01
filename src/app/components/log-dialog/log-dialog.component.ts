@@ -1,4 +1,4 @@
-import { Component, OnInit, AfterViewInit, inject, signal, ChangeDetectionStrategy, output, ViewChild, ElementRef } from '@angular/core';
+import { Component, OnInit, AfterViewInit, inject, signal, ChangeDetectionStrategy, output, ViewChild, ElementRef, computed } from '@angular/core';
 import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
 import { IpcService } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
@@ -23,6 +23,11 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   recent = this.ipc.recent;
 
   selectedSlots = signal<string[]>([]);
+  allSelected = computed(() => {
+    const all = this.allSlots();
+    const selected = this.selectedSlots();
+    return all.length > 0 && selected.length === all.length && all.every(s => selected.includes(s));
+  });
   description = '';
   category = '';
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
@@ -56,6 +61,14 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     const set = new Set(this.selectedSlots());
     set.has(s) ? set.delete(s) : set.add(s);
     this.selectedSlots.set(Array.from(set).sort());
+  }
+  toggleAllSlots() {
+    if (this.allSelected()) {
+      this.selectedSlots.set([]);
+    } else {
+      // Copy in case pendingSlots is a signal that may mutate externally
+      this.selectedSlots.set([...this.allSlots()].sort());
+    }
   }
   remove(i: number) {
     const next = [...this.selectedSlots()];
