@@ -44,18 +44,45 @@ function notifyForSlot(slot) {
     const body = `Log ${day} ${hh}:${mm}–${hh}:${(Number(mm) + slotLen)
         .toString()
         .padStart(2, '0')}`;
-    const n = new electron_1.Notification({ title: 'Work Logger', body, silent: true });
+    const st = (0, db_1.getSettings)();
+    const n = new electron_1.Notification({ title: 'Tid til at registér tid', body, silent: !!st.notification_silent });
     n.on('click', () => {
-        win?.show();
-        win?.focus();
-        win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
+        if (win) {
+            try {
+                if (win.isMinimized())
+                    win.restore();
+            }
+            catch { }
+            try {
+                win.show();
+            }
+            catch { }
+            try {
+                win.focus();
+            }
+            catch { }
+            try {
+                win.setAlwaysOnTop(true);
+                win.focus();
+                setTimeout(() => { try {
+                    win.setAlwaysOnTop(false);
+                }
+                catch { } }, 400);
+            }
+            catch { }
+            console.log('[main] notification click -> prompt:open', (0, time_1.slotKey)(slot));
+            win.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
+        }
+        else {
+            console.warn('[main] notification clicked but window is null');
+        }
     });
     n.show();
 }
 function scheduleTicker() {
     const now = new Date();
     let next = (0, time_1.nextQuarter)(now);
-    // Use dynamic working hours from settings instead of hardcoded 08:00–16:00
+    // Establish today's working window boundaries from settings
     const s = (0, db_1.getSettings)();
     const { h: sh, m: sm } = (0, time_1.parseHM)(s.work_start);
     const { h: eh, m: em } = (0, time_1.parseHM)(s.work_end);
@@ -64,10 +91,10 @@ function scheduleTicker() {
     const end = new Date(now);
     end.setHours(eh, em, 0, 0);
     if (now < start) {
-        next = start;
+        next = start; // first tick at work start
     }
     else if (now >= end) {
-        // Move to next enabled workday start. If next day is disabled, advance until enabled.
+        // Move to next workday start (skipping disabled days)
         let tomorrow = new Date(now);
         do {
             tomorrow.setDate(tomorrow.getDate() + 1);
@@ -76,14 +103,65 @@ function scheduleTicker() {
         next = tomorrow;
     }
     const tick = () => {
-        const when = new Date();
-        if ((0, time_1.isWorkTime)(when)) {
-            const slot = (0, time_1.currentSlotStart)(when);
-            const key = (0, time_1.slotKey)(slot);
-            pending.add(key);
-            notifyForSlot(slot);
+        const boundary = new Date(); // slot boundary (start of new slot)
+        if ((0, time_1.isWorkTime)(boundary)) {
+            const gran = (0, time_1.getSlotMinutes)();
+            const currentStart = (0, time_1.currentSlotStart)(boundary); // start of slot that just began
+            const prevStart = new Date(currentStart.getTime() - gran * 60000); // slot that just finished
+            // Debug: log both previous and current slot boundaries to verify we are enqueueing the START of the finished slot
+            try {
+                console.log('[main] tick boundary', {
+                    boundary: boundary.toISOString(),
+                    gran,
+                    currentStart: (0, time_1.slotKey)(currentStart),
+                    prevStart: (0, time_1.slotKey)(prevStart)
+                });
+            }
+            catch { /* ignore logging errors */ }
+            // Re-evaluate working window for this boundary (in case settings changed mid-day)
+            const sDyn = (0, db_1.getSettings)();
+            const { h: dsh, m: dsm } = (0, time_1.parseHM)(sDyn.work_start);
+            const { h: deh, m: dem } = (0, time_1.parseHM)(sDyn.work_end);
+            const dayStart = new Date(boundary);
+            dayStart.setHours(dsh, dsm, 0, 0);
+            const dayEnd = new Date(boundary);
+            dayEnd.setHours(deh, dem, 0, 0);
+            if (prevStart >= dayStart && prevStart < dayEnd) {
+                const key = (0, time_1.slotKey)(prevStart);
+                pending.add(key);
+                try {
+                    console.log('[main] enqueue prevStart', key, 'pending size', pending.size);
+                }
+                catch { }
+                notifyForSlot(prevStart);
+                if (sDyn.auto_focus_on_slot && win) {
+                    try {
+                        if (win.isMinimized())
+                            win.restore();
+                    }
+                    catch { }
+                    try {
+                        win.show();
+                    }
+                    catch { }
+                    try {
+                        win.focus();
+                    }
+                    catch { }
+                    try {
+                        win.setAlwaysOnTop(true);
+                        win.focus();
+                        setTimeout(() => { try {
+                            win.setAlwaysOnTop(false);
+                        }
+                        catch { } }, 350);
+                    }
+                    catch { }
+                    console.log('[main] auto-focus tick -> prompt:open', key);
+                    win.webContents.send('prompt:open', { slot: key });
+                }
+            }
         }
-        // Re-schedule using up-to-date slot length and settings
         const n = (0, time_1.nextQuarter)(new Date());
         setTimeout(tick, n.getTime() - Date.now());
     };
@@ -129,6 +207,7 @@ electron_1.ipcMain.handle('db:get-days', () => (0, db_1.getDays)());
 electron_1.ipcMain.handle('db:save-entries', (_e, entries) => (0, db_1.saveEntries)(entries));
 electron_1.ipcMain.handle('db:get-summary', (_e, day) => (0, db_1.getSummary)(day));
 electron_1.ipcMain.handle('db:get-recent', (_e, limit) => (0, db_1.getDistinctRecent)(limit ?? 20));
+electron_1.ipcMain.handle('db:get-recent-today', (_e, limit) => (0, db_1.getDistinctRecentToday)(limit ?? 20));
 // Settings handlers (missing previously)
 electron_1.ipcMain.handle('db:get-settings', () => { const s = (0, db_1.getSettings)(); return s; });
 electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
@@ -165,7 +244,8 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
 electron_1.ipcMain.handle('debug:notify', (_e, opts) => {
     const body = opts?.body ?? 'Test notification';
     const slot = new Date();
-    const n = new electron_1.Notification({ title: 'Work Logger (Test)', body, silent: true });
+    const st = (0, db_1.getSettings)();
+    const n = new electron_1.Notification({ title: 'Work Logger (Test)', body, silent: !!st.notification_silent });
     n.on('click', () => {
         win?.show();
         win?.focus();

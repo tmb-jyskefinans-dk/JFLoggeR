@@ -9,6 +9,7 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     getSummary: (day) => electron_1.ipcRenderer.invoke('db:get-summary', day),
     getDays: () => electron_1.ipcRenderer.invoke('db:get-days'),
     getRecent: (limit) => electron_1.ipcRenderer.invoke('db:get-recent', limit),
+    getRecentToday: (limit) => electron_1.ipcRenderer.invoke('db:get-recent-today', limit),
     getSettings: () => electron_1.ipcRenderer.invoke('db:get-settings'),
     saveSettings: (s) => electron_1.ipcRenderer.invoke('db:save-settings', s),
     // Backlog queue

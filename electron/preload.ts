@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('workApi', {
   getSummary: (day: string) => ipcRenderer.invoke('db:get-summary', day),
   getDays: () => ipcRenderer.invoke('db:get-days'),
   getRecent: (limit?: number) => ipcRenderer.invoke('db:get-recent', limit),
+  getRecentToday: (limit?: number) => ipcRenderer.invoke('db:get-recent-today', limit),
   getSettings: () => ipcRenderer.invoke('db:get-settings'),
   saveSettings: (s: any) => ipcRenderer.invoke('db:save-settings', s),
 

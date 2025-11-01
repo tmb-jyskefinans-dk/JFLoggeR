@@ -8,6 +8,7 @@ declare global {
       getSummary(day: string): Promise<any[]>;
       getDays(): Promise<any[]>;
       getRecent(limit?: number): Promise<any[]>;
+  getRecentToday?(limit?: number): Promise<any[]>;
       getPendingSlots(): Promise<string[]>;
       getSettings(): Promise<any>;
       saveSettings(settings: any): Promise<void>;
@@ -31,10 +32,14 @@ export class IpcService {
   pendingSlots = signal<string[]>([]);
   recent = signal<any[]>([]);
   settings = signal<any|null>(null);
+  lastPromptSlot = signal<string|null>(null);
 
 
   constructor() {
-    window.workApi.onPrompt(() => this.loadPending());
+    window.workApi.onPrompt((d) => {
+      if (d && typeof d.slot === 'string') this.lastPromptSlot.set(d.slot);
+      this.loadPending();
+    });
     window.workApi.onFocus(() => this.loadPending());
     this.refreshDays();
     this.loadPending();
@@ -60,7 +65,14 @@ export class IpcService {
     const summaryP = window.workApi.getSummary(day).then(this.summary.set);
     return Promise.all([entriesP, summaryP]).then(() => {});
   }
-  loadRecent() { window.workApi.getRecent(20).then(this.recent.set); }
+  loadRecent() {
+    // Prefer today-aware recent if available
+    if (window.workApi.getRecentToday) {
+      window.workApi.getRecentToday(20).then(this.recent.set);
+    } else {
+      window.workApi.getRecent(20).then(this.recent.set);
+    }
+  }
   loadPending() { window.workApi.getPendingSlots().then(this.pendingSlots.set); }
   loadSettings() {
     window.workApi.getSettings()

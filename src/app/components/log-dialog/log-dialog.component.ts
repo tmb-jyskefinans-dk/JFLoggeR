@@ -36,10 +36,16 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
 
   ngOnInit() {
     const list = this.ipc.pendingSlots();
-    this.selectedSlots.set(list.slice(0, 1));
-    if (!this.recent().length) {
-      this.ipc.loadRecent();
+    const promptSlot = this.ipc.lastPromptSlot ? this.ipc.lastPromptSlot() : null;
+    console.log(promptSlot, list);
+    if (promptSlot && list.includes(promptSlot)) {
+      // Prefer the slot that triggered the dialog
+      this.selectedSlots.set([promptSlot]);
+    } else if (list.length) {
+      // Fallback: first pending slot
+      this.selectedSlots.set(list.slice(0, 1));
     }
+    this.ipc.loadRecent();
   }
 
   ngAfterViewInit() {

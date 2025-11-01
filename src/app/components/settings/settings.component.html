@@ -32,7 +32,7 @@
       <div class="flex flex-col gap-1">
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Intervallængde (minutter)</label>
   <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" [ngModel]="slotMinutes()" (ngModelChange)="slotMinutes.set($event)" name="slot_minutes" required>
-          @for(m of [5,10,15,20,30,60]; track m) { <option [value]="m">{{m}}</option> }
+          @for(m of [1,5,10,15,20,30,60]; track m) { <option [value]="m">{{m}}</option> }
         </select>
       </div>
 
@@ -47,6 +47,45 @@
             </button>
           }
         </div>
+      </div>
+
+      <div class="md:col-span-3 flex items-start gap-3 mt-2">
+        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="autoFocusOnSlot()" (ngModelChange)="autoFocusOnSlot.set($event)" name="auto_focus_on_slot" aria-describedby="auto-focus-help">
+          <span class="leading-tight">
+            Bring window to front & open log dialog automatically when a new interval starts
+            <span id="auto-focus-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Enable for aggressive prompting. Disable if you prefer passive notifications only.</span>
+          </span>
+        </label>
+      </div>
+
+      <div class="md:col-span-3 flex items-start gap-3">
+        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="notificationSilent()" (ngModelChange)="notificationSilent.set($event)" name="notification_silent" aria-describedby="notif-silent-help">
+          <span class="leading-tight">
+            Silent notifications (no sound)
+            <span id="notif-silent-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Uncheck to allow system sound when a new interval is ready.</span>
+          </span>
+        </label>
+      </div>
+
+      <div class="md:col-span-3 flex flex-col gap-2">
+        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Tema</label>
+        <div class="flex flex-wrap gap-4 text-sm">
+          <label class="inline-flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="theme_mode" [checked]="theme.mode()==='system'" (change)="theme.setMode('system')" class="h-4 w-4 border-slate-300 dark:border-slate-600">
+            System
+          </label>
+          <label class="inline-flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="theme_mode" [checked]="theme.mode()==='light'" (change)="theme.setMode('light')" class="h-4 w-4 border-slate-300 dark:border-slate-600">
+            Lys
+          </label>
+          <label class="inline-flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="theme_mode" [checked]="theme.mode()==='dark'" (change)="theme.setMode('dark')" class="h-4 w-4 border-slate-300 dark:border-slate-600">
+            Mørk
+          </label>
+        </div>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Valg af Lys/Mørk ignorerer systemets præference. System følger Windows macOS farveskema automatisk.</p>
       </div>
 
       <div class="md:col-span-3 mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">

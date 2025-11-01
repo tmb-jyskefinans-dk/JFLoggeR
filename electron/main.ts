@@ -9,6 +9,7 @@ import {
   getSummary,
   getDays,
   getDistinctRecent,
+  getDistinctRecentToday,
   getSettings,
   saveSettings
 } from './db';
@@ -67,11 +68,19 @@ function notifyForSlot(slot: Date) {
     .toString()
     .padStart(2, '0')}`;
 
-  const n = new Notification({ title: 'Work Logger', body, silent: true });
+  const st = getSettings();
+  const n = new Notification({ title: 'Tid til at registér tid', body, silent: !!st.notification_silent });
   n.on('click', () => {
-    win?.show();
-    win?.focus();
-    win?.webContents.send('prompt:open', { slot: slotKey(slot) });
+    if (win) {
+      try { if (win.isMinimized()) win.restore(); } catch { }
+      try { win.show(); } catch { }
+      try { win.focus(); } catch { }
+      try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 400); } catch { }
+      console.log('[main] notification click -> prompt:open', slotKey(slot));
+      win.webContents.send('prompt:open', { slot: slotKey(slot) });
+    } else {
+      console.warn('[main] notification clicked but window is null');
+    }
   });
   n.show();
 }
@@ -80,18 +89,17 @@ function scheduleTicker() {
   const now = new Date();
   let next = nextQuarter(now);
 
-  // Use dynamic working hours from settings instead of hardcoded 08:00–16:00
+  // Establish today's working window boundaries from settings
   const s = getSettings();
   const { h: sh, m: sm } = parseHM(s.work_start);
   const { h: eh, m: em } = parseHM(s.work_end);
-
   const start = new Date(now); start.setHours(sh, sm, 0, 0);
-  const end   = new Date(now); end.setHours(eh, em, 0, 0);
+  const end = new Date(now); end.setHours(eh, em, 0, 0);
 
   if (now < start) {
-    next = start;
+    next = start; // first tick at work start
   } else if (now >= end) {
-    // Move to next enabled workday start. If next day is disabled, advance until enabled.
+    // Move to next workday start (skipping disabled days)
     let tomorrow = new Date(now);
     do {
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -101,14 +109,43 @@ function scheduleTicker() {
   }
 
   const tick = () => {
-    const when = new Date();
-    if (isWorkTime(when)) {
-      const slot = currentSlotStart(when);
-      const key = slotKey(slot);
-      pending.add(key);
-      notifyForSlot(slot);
+    const boundary = new Date(); // slot boundary (start of new slot)
+    if (isWorkTime(boundary)) {
+      const gran = getSlotMinutes();
+      const currentStart = currentSlotStart(boundary); // start of slot that just began
+      const prevStart = new Date(currentStart.getTime() - gran * 60000); // slot that just finished
+      // Debug: log both previous and current slot boundaries to verify we are enqueueing the START of the finished slot
+      try {
+        console.log('[main] tick boundary', {
+          boundary: boundary.toISOString(),
+          gran,
+          currentStart: slotKey(currentStart),
+          prevStart: slotKey(prevStart)
+        });
+      } catch { /* ignore logging errors */ }
+
+      // Re-evaluate working window for this boundary (in case settings changed mid-day)
+      const sDyn = getSettings();
+      const { h: dsh, m: dsm } = parseHM(sDyn.work_start);
+      const { h: deh, m: dem } = parseHM(sDyn.work_end);
+      const dayStart = new Date(boundary); dayStart.setHours(dsh, dsm, 0, 0);
+      const dayEnd = new Date(boundary); dayEnd.setHours(deh, dem, 0, 0);
+
+      if (prevStart >= dayStart && prevStart < dayEnd) {
+        const key = slotKey(prevStart);
+        pending.add(key);
+        try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch {}
+        notifyForSlot(prevStart);
+        if (sDyn.auto_focus_on_slot && win) {
+          try { if (win.isMinimized()) win.restore(); } catch { }
+          try { win.show(); } catch { }
+          try { win.focus(); } catch { }
+          try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 350); } catch { }
+          console.log('[main] auto-focus tick -> prompt:open', key);
+          win.webContents.send('prompt:open', { slot: key });
+        }
+      }
     }
-    // Re-schedule using up-to-date slot length and settings
     const n = nextQuarter(new Date());
     setTimeout(tick, n.getTime() - Date.now());
   };
@@ -155,6 +192,9 @@ ipcMain.handle('db:get-summary', (_e, day: string) => getSummary(day));
 ipcMain.handle('db:get-recent', (_e, limit?: number) =>
   getDistinctRecent(limit ?? 20)
 );
+ipcMain.handle('db:get-recent-today', (_e, limit?: number) =>
+  getDistinctRecentToday(limit ?? 20)
+);
 // Settings handlers (missing previously)
 ipcMain.handle('db:get-settings', () => { const s = getSettings(); return s; });
 ipcMain.handle('db:save-settings', (_e, s) => {
@@ -176,8 +216,8 @@ ipcMain.handle(
     payload.slots.forEach((k) => {
       const [day, hm] = k.split('T');
       const [h, m] = hm.split(':');
-  const slotLen = getSlotMinutes();
-  const endMin = (Number(m) + slotLen) % 60;
+      const slotLen = getSlotMinutes();
+      const endMin = (Number(m) + slotLen) % 60;
       const endHour = endMin === 0 ? Number(h) + 1 : Number(h);
       const entry = {
         day,
@@ -202,7 +242,8 @@ ipcMain.handle(
 ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
   const body = opts?.body ?? 'Test notification';
   const slot = new Date();
-  const n = new Notification({ title: 'Work Logger (Test)', body, silent: true });
+  const st = getSettings();
+  const n = new Notification({ title: 'Work Logger (Test)', body, silent: !!st.notification_silent });
   n.on('click', () => {
     win?.show();
     win?.focus();

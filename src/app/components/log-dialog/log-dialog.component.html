@@ -41,9 +41,9 @@
       <select (change)="applyPreset($any($event.target).value)"
         class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 mb-1">
   <option value="">Vælg tidligere registrering…</option>
-        @for(r of recent(); track r) {
+        @for(r of recent(); track (r.description+'||'+r.category)) {
           <option [value]="r.description+'||'+r.category">
-            {{r.description}} — {{r.category}} ({{r.uses}})
+            {{r.description}} — {{r.category}} ({{ r.uses_today ?? r.uses }} i dag)
           </option>
         }
       </select>

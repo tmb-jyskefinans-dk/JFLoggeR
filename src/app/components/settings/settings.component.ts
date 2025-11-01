@@ -1,4 +1,5 @@
 import { Component, inject, ChangeDetectionStrategy, effect, signal, computed } from '@angular/core';
+import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
 import { IpcService } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
@@ -12,12 +13,15 @@ import { FormsModule } from '@angular/forms';
 })
 export class SettingsComponent {
   ipc = inject(IpcService);
+  theme = inject(ThemeService);
 
   // Signals replacing primitive fields
   workStart = signal<string>('08:00');
   workEnd = signal<string>('16:00');
   slotMinutes = signal<number>(15);
   weekdayState = signal<boolean[]>([false, true, true, true, true, true, false]);
+  autoFocusOnSlot = signal<boolean>(false);
+  notificationSilent = signal<boolean>(true);
 
   days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   initialSettings = signal<any|null>(null);
@@ -41,7 +45,9 @@ export class SettingsComponent {
     return s.work_start !== this.workStart() ||
            s.work_end !== this.workEnd() ||
            s.slot_minutes !== this.slotMinutes() ||
-           maskOrig !== maskNow;
+           maskOrig !== maskNow ||
+           (!!s.auto_focus_on_slot !== this.autoFocusOnSlot()) ||
+           (!!s.notification_silent !== this.notificationSilent());
   });
 
   constructor() {
@@ -59,6 +65,8 @@ export class SettingsComponent {
     this.workEnd.set(s.work_end);
     this.slotMinutes.set(s.slot_minutes);
     this.weekdayState.set(Array.from({length:7},(_,i)=> (s.weekdays_mask & (1<<i))!==0));
+    this.autoFocusOnSlot.set(!!s.auto_focus_on_slot);
+    this.notificationSilent.set(!!s.notification_silent);
   }
 
   save() {
@@ -67,7 +75,9 @@ export class SettingsComponent {
       work_start: this.workStart(),
       work_end: this.workEnd(),
       slot_minutes: Number(this.slotMinutes()),
-      weekdays_mask
+      weekdays_mask,
+      auto_focus_on_slot: this.autoFocusOnSlot(),
+      notification_silent: this.notificationSilent()
     };
     this.ipc.saveSettings(payload);
     // Update baseline after save for change detection

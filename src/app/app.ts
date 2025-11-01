@@ -18,12 +18,24 @@ export class AppComponent {
   today = this.clock.today;
   dialogOpen = signal(false);
   pendingCount = signal(0);
+  // Track which prompt slot has already triggered an auto-open to avoid reopening immediately after close
+  handledPromptSlot = signal<string|null>(null);
   theme = inject(ThemeService);
 
   constructor() {
     effect(() => this.pendingCount.set(this.ipc.pendingSlots().length));
     // Apply theme class to <html> for Tailwind dark: variants
     // pending count effect retained; theme handled by ThemeService
+    // Open log dialog automatically when a prompt arrives (if not already open)
+    effect(() => {
+      const slot = this.ipc.lastPromptSlot();
+      if (!slot) return;
+      // Only auto-open if different from last handled slot and currently closed
+      if (slot !== this.handledPromptSlot() && !this.dialogOpen()) {
+        this.dialogOpen.set(true);
+        this.handledPromptSlot.set(slot);
+      }
+    });
   }
 
   openDialog() { this.dialogOpen.set(true); }

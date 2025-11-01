@@ -8,6 +8,7 @@ exports.getDayEntries = getDayEntries;
 exports.getDays = getDays;
 exports.getSummary = getSummary;
 exports.getDistinctRecent = getDistinctRecent;
+exports.getDistinctRecentToday = getDistinctRecentToday;
 exports.ensureDayCreated = ensureDayCreated;
 exports.lastNEntries = lastNEntries;
 const tslib_1 = require("tslib");
@@ -21,7 +22,9 @@ const DEFAULT_SETTINGS = {
     work_start: '08:00',
     work_end: '16:00',
     slot_minutes: 15,
-    weekdays_mask: 0b0111110 // Mon–Fri
+    weekdays_mask: 0b0111110, // Mon–Fri
+    auto_focus_on_slot: false,
+    notification_silent: true
 };
 let db;
 function ensureDb() {
@@ -52,6 +55,17 @@ function initDb() {
         db.data.settings = { ...DEFAULT_SETTINGS };
         changed = true;
     }
+    else {
+        // ensure new fields
+        if (typeof db.data.settings.auto_focus_on_slot !== 'boolean') {
+            db.data.settings.auto_focus_on_slot = DEFAULT_SETTINGS.auto_focus_on_slot;
+            changed = true;
+        }
+        if (typeof db.data.settings.notification_silent !== 'boolean') {
+            db.data.settings.notification_silent = DEFAULT_SETTINGS.notification_silent;
+            changed = true;
+        }
+    }
     if (typeof db.data._seq !== 'number') {
         db.data._seq = 1;
         changed = true;
@@ -76,7 +90,9 @@ function saveSettings(s) {
         work_start: s.work_start,
         work_end: s.work_end,
         slot_minutes: Number(s.slot_minutes) || 15,
-        weekdays_mask: Number(s.weekdays_mask) >>> 0
+        weekdays_mask: Number(s.weekdays_mask) >>> 0,
+        auto_focus_on_slot: !!s.auto_focus_on_slot,
+        notification_silent: !!s.notification_silent
     };
     db.write();
 }
@@ -149,6 +165,32 @@ function getDistinctRecent(limit = 20) {
         }
         const g = grouped.get(key);
         g.uses++;
+        if (e.created_at && (!g.last_used || e.created_at > g.last_used))
+            g.last_used = e.created_at;
+    }
+    return Array.from(grouped.values())
+        .sort((a, b) => b.last_used.localeCompare(a.last_used))
+        .slice(0, limit);
+}
+// Variant that also reports how many times an item was used today (local date)
+function getDistinctRecentToday(limit = 20) {
+    ensureDb();
+    db.read();
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    const todayKey = `${y}-${m}-${d}`;
+    const grouped = new Map();
+    for (const e of db.data.entries) {
+        const key = `${e.description}||${e.category}`;
+        if (!grouped.has(key)) {
+            grouped.set(key, { description: e.description, category: e.category, uses: 0, uses_today: 0, last_used: e.created_at ?? '' });
+        }
+        const g = grouped.get(key);
+        g.uses++;
+        if (e.day === todayKey)
+            g.uses_today++;
         if (e.created_at && (!g.last_used || e.created_at > g.last_used))
             g.last_used = e.created_at;
     }

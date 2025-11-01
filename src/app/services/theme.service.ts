@@ -29,6 +29,8 @@ export class ThemeService {
       const isDark = mode === 'system' ? sys : (mode === 'dark');
       this.effective.set(isDark ? 'dark' : 'light');
       document.documentElement.classList.toggle('dark', isDark);
+      // Force UA native widgets / scrollbars into correct scheme (prevents OS dark overriding light choice)
+      document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
       localStorage.setItem('themeMode', mode);
     });
   }
