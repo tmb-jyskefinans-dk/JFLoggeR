@@ -35,7 +35,7 @@ function ensureDb() {
     }
 }
 function initDb() {
-    const dir = electron_1.app.getPath('userData') + "/worklogger";
+    const dir = electron_1.app.getPath('userData');
     if (!fs.existsSync(dir))
         fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, '/worklogger.json');

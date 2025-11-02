@@ -49,7 +49,7 @@ function ensureDb() {
 }
 
 export function initDb() {
-  const dir = app.getPath('userData')+ "/worklogger";
+  const dir = app.getPath('userData');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const file = path.join(dir, '/worklogger.json');
