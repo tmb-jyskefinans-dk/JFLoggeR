@@ -14,6 +14,10 @@ function createWindow() {
         width: 1380,
         height: 860,
         show: false,
+        frame: false, // frameless so we can draw custom title bar + window controls
+        titleBarStyle: 'hidden', // hide native title bar (macOS shows traffic lights inset if frame true)
+        title: 'JF LoggR',
+        backgroundColor: '#1e293b', // slight dark bg during load (adjust to theme)
         webPreferences: {
             preload: node_path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -30,6 +34,11 @@ function createWindow() {
         win.loadFile(node_path_1.default.join(__dirname, '../../dist/work-logger/browser/index.html'));
     }
     win.on('ready-to-show', () => win?.show());
+    // Forward maximize state changes to renderer so custom controls reflect current state
+    win.on('maximize', () => win?.webContents.send('window:maximize-state', { maximized: true }));
+    win.on('unmaximize', () => win?.webContents.send('window:maximize-state', { maximized: false }));
+    win.on('enter-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: true }));
+    win.on('leave-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: win?.isMaximized() ?? false }));
 }
 function notifyForSlot(slot) {
     const day = (0, time_1.toLocalDateYMD)(slot);
@@ -278,11 +287,28 @@ electron_1.ipcMain.handle('debug:notify', (_e, opts) => {
     n.show();
     return { ok: true };
 });
+// Window control handlers (invoked from renderer via preload contextBridge)
+electron_1.ipcMain.handle('window:minimize', () => { win?.minimize(); return { ok: true }; });
+electron_1.ipcMain.handle('window:toggle-maximize', () => {
+    if (!win)
+        return { ok: false, maximized: false };
+    if (win.isMaximized())
+        win.unmaximize();
+    else
+        win.maximize();
+    return { ok: true, maximized: win.isMaximized() };
+});
+electron_1.ipcMain.handle('window:close', () => { win?.close(); return { ok: true }; });
 electron_1.app.whenReady().then(() => {
     console.log('[main] app is ready, initializing DB and window...');
     (0, db_1.initDb)();
     console.log('[main] creating main window...');
     createWindow();
+    // Remove default application menu (we provide custom controls in renderer)
+    try {
+        electron_1.Menu.setApplicationMenu(null);
+    }
+    catch { }
     console.log('[main] rebuilding backlog for today...');
     rebuildBacklogForToday({ includeFuture: false });
     console.log('[main] scheduling ticker for notifications...');

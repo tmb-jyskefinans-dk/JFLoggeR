@@ -29,8 +29,8 @@
     "package": "electron-forge package"
   },
   "build": {
-    "appId": "com.jyskefinans.worklogger",
-    "productName": "Work Logger",
+    "appId": "com.jyskefinans.jfloggr",
+    "productName": "JF LoggR",
     "files": [
       "dist/work-logger/**",
       "electron/**",

@@ -19,6 +19,11 @@ declare global {
   onAppReady?: (cb: () => void) => void;
   sendTestNotification?(body?: string): Promise<{ ok: boolean }>;
   onQueueUpdated?(cb: () => void): void;
+  // Window controls
+  minimizeWindow?(): Promise<{ ok: boolean }>;
+  toggleMaximizeWindow?(): Promise<{ ok: boolean, maximized?: boolean }>;
+  closeWindow?(): Promise<{ ok: boolean }>;
+  onMaximizeState?(cb: (s: { maximized: boolean }) => void): void;
     }
   }
 }
@@ -34,6 +39,7 @@ export class IpcService {
   recent = signal<any[]>([]);
   settings = signal<any|null>(null);
   lastPromptSlot = signal<string|null>(null);
+  windowMaximized = signal<boolean>(false);
 
 
   constructor() {
@@ -53,6 +59,7 @@ export class IpcService {
         if (!this.settings()) this.loadSettings();
       });
       window.workApi.onQueueUpdated?.(() => this.loadPending());
+      window.workApi.onMaximizeState?.((s) => this.windowMaximized.set(!!s.maximized));
     } catch { /* ignore */ }
   }
 
@@ -120,4 +127,8 @@ export class IpcService {
   testNotify(body?: string) {
     return window.workApi.sendTestNotification?.(body);
   }
+
+  minimizeWindow() { return window.workApi.minimizeWindow?.(); }
+  toggleMaximizeWindow() { return window.workApi.toggleMaximizeWindow?.().then(r => { if (r?.maximized !== undefined) this.windowMaximized.set(!!r.maximized); }); }
+  closeWindow() { return window.workApi.closeWindow?.(); }
 }

@@ -1,7 +1,8 @@
 <div class="min-h-screen bg-gradient-to-b from-white to-slate-50 dark:from-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 selection:bg-indigo-200 dark:selection:bg-indigo-500/40 transition-colors duration-300">
   <header class="sticky top-0 z-20 border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/70 backdrop-blur shadow-sm">
+    <window-controls />
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
-  <h1 class="text-lg md:text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Arbejdslog</h1>
+  <h1 class="text-lg md:text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">JF LoggR</h1>
       <nav class="flex gap-2 text-xs md:text-sm font-medium">
   <a routerLink="/today" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">I dag</a>
   <a [routerLink]="['/summary', today()]" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">Opsummering</a>

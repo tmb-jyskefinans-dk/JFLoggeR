@@ -9,7 +9,13 @@ module.exports = {
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
-      config: {},
+      config: {
+        // Explicit shortcut name so Desktop & Start Menu entries use branded name
+        shortcutName: 'JF LoggR',
+        // Setup executable name (optional branding)
+        setupExe: 'JF-LoggR-Setup.exe'
+        // If you add an .ico later, specify: setupIcon: 'assets/icon.ico'
+      },
     },
     {
       name: '@electron-forge/maker-zip',

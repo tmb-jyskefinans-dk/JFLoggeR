@@ -26,4 +26,10 @@ contextBridge.exposeInMainWorld('workApi', {
   onQueueUpdated: (cb: () => void) => ipcRenderer.on('queue:updated', cb),
   // Debug notification trigger
   sendTestNotification: (body?: string) => ipcRenderer.invoke('debug:notify', { body })
+  ,
+  // Window controls
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
+  onMaximizeState: (cb: (state: { maximized: boolean }) => void) => ipcRenderer.on('window:maximize-state', (_e, d) => cb(d))
 });

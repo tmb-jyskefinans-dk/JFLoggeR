@@ -1,5 +1,6 @@
 import { Component, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink, RouterOutlet } from '@angular/router';
+import { WindowControlsComponent } from './components/window-controls/window-controls.component';
 import { IpcService } from './services/ipc.service';
 import { ClockService } from './services/clock.service';
 import { LogDialogComponent } from './components/log-dialog/log-dialog.component';
@@ -8,7 +9,7 @@ import { ThemeService } from './services/theme.service';
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, RouterOutlet, LogDialogComponent],
+  imports: [RouterLink, RouterOutlet, LogDialogComponent, WindowControlsComponent],
   templateUrl: "./app.component.html",
   styleUrls: []
 })

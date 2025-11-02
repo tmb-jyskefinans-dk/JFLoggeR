@@ -1,5 +1,5 @@
 // electron/main.ts
-import { app, BrowserWindow, ipcMain, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, Menu } from 'electron';
 import path from 'node:path';
 
 import {
@@ -36,6 +36,10 @@ function createWindow() {
     width: 1380,
     height: 860,
     show: false,
+    frame: false, // frameless so we can draw custom title bar + window controls
+    titleBarStyle: 'hidden', // hide native title bar (macOS shows traffic lights inset if frame true)
+    title: 'JF LoggR',
+    backgroundColor: '#1e293b', // slight dark bg during load (adjust to theme)
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -54,6 +58,12 @@ function createWindow() {
   }
 
   win.on('ready-to-show', () => win?.show());
+
+  // Forward maximize state changes to renderer so custom controls reflect current state
+  win.on('maximize', () => win?.webContents.send('window:maximize-state', { maximized: true }));
+  win.on('unmaximize', () => win?.webContents.send('window:maximize-state', { maximized: false }));
+  win.on('enter-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: true }));
+  win.on('leave-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: win?.isMaximized() ?? false }));
 }
 
 function notifyForSlot(slot: Date) {
@@ -268,11 +278,22 @@ ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
   return { ok: true };
 });
 
+// Window control handlers (invoked from renderer via preload contextBridge)
+ipcMain.handle('window:minimize', () => { win?.minimize(); return { ok: true }; });
+ipcMain.handle('window:toggle-maximize', () => {
+  if (!win) return { ok: false, maximized: false };
+  if (win.isMaximized()) win.unmaximize(); else win.maximize();
+  return { ok: true, maximized: win.isMaximized() };
+});
+ipcMain.handle('window:close', () => { win?.close(); return { ok: true }; });
+
 app.whenReady().then(() => {
   console.log('[main] app is ready, initializing DB and window...');
   initDb();
   console.log('[main] creating main window...');
   createWindow();
+  // Remove default application menu (we provide custom controls in renderer)
+  try { Menu.setApplicationMenu(null); } catch {}
   console.log('[main] rebuilding backlog for today...');
   rebuildBacklogForToday({ includeFuture: false });
   console.log('[main] scheduling ticker for notifications...');

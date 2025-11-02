@@ -23,6 +23,11 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     // Queue update event (pending slots rebuilt)
     onQueueUpdated: (cb) => electron_1.ipcRenderer.on('queue:updated', cb),
     // Debug notification trigger
-    sendTestNotification: (body) => electron_1.ipcRenderer.invoke('debug:notify', { body })
+    sendTestNotification: (body) => electron_1.ipcRenderer.invoke('debug:notify', { body }),
+    // Window controls
+    minimizeWindow: () => electron_1.ipcRenderer.invoke('window:minimize'),
+    toggleMaximizeWindow: () => electron_1.ipcRenderer.invoke('window:toggle-maximize'),
+    closeWindow: () => electron_1.ipcRenderer.invoke('window:close'),
+    onMaximizeState: (cb) => electron_1.ipcRenderer.on('window:maximize-state', (_e, d) => cb(d))
 });
 //# sourceMappingURL=preload.js.map
