@@ -19,6 +19,7 @@ import {
   nextQuarter,
   currentSlotStart,
   isWorkTime,
+  isWorkdayEnabled,
   slotKey,
   daySlots,
   toLocalDateYMD,
@@ -28,6 +29,7 @@ import {
 
 let win: BrowserWindow | null = null;
 const pending: Set<string> = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
+let tickerHandle: NodeJS.Timeout | null = null; // current scheduled tick timeout
 
 function createWindow() {
   win = new BrowserWindow({
@@ -35,25 +37,19 @@ function createWindow() {
     height: 860,
     show: false,
     webPreferences: {
-      // IMPORTANT: when compiled, __dirname points to electron/.dist
-      // and preload.ts compiles to preload.js in the same folder.
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
 
-  // Required for Windows native notifications to group by app
   app.setAppUserModelId('com.jyskefinans.worklogger');
 
   const devUrl = process.env['VITE_DEV_SERVER_URL'];
   if (devUrl) {
-    // Dev: Angular dev server
     win.loadURL(devUrl);
     win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // Prod: load the built Angular index.html
-    // Note: this path is relative to electron/.dist (compiled output)
     win.loadFile(path.join(__dirname, '../../dist/work-logger/browser/index.html'));
   }
 
@@ -65,20 +61,18 @@ function notifyForSlot(slot: Date) {
   const hh = `${slot.getHours()}`.padStart(2, '0');
   const mm = `${slot.getMinutes()}`.padStart(2, '0');
   const slotLen = getSlotMinutes();
-  const body = `Log ${day} ${hh}:${mm}–${hh}:${(Number(mm) + slotLen)
-    .toString()
-    .padStart(2, '0')}`;
+  const body = `Log ${day} ${hh}:${mm}–${hh}:${(Number(mm) + slotLen).toString().padStart(2, '0')}`;
 
   const st = getSettings();
   const n = new Notification({ title: 'Tid til at registér tid', body, silent: !!st.notification_silent });
   n.on('click', () => {
     if (win) {
-      try { if (win.isMinimized()) win.restore(); } catch { }
-      try { win.show(); } catch { }
-      try { win.focus(); } catch { }
-      try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 400); } catch { }
+      try { if (win.isMinimized()) win.restore(); } catch {}
+      try { win.show(); } catch {}
+      try { win.focus(); } catch {}
+      try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 400); } catch {}
       console.log('[main] notification click -> prompt:open', slotKey(slot));
-      win.webContents.send('prompt:open', { slot: slotKey(slot) });
+      win?.webContents.send('prompt:open', { slot: slotKey(slot) });
     } else {
       console.warn('[main] notification clicked but window is null');
     }
@@ -87,71 +81,42 @@ function notifyForSlot(slot: Date) {
 }
 
 function scheduleTicker() {
-  const now = new Date();
-  let next = nextQuarter(now);
-
-  // Establish today's working window boundaries from settings
-  const s = getSettings();
-  const { h: sh, m: sm } = parseHM(s.work_start);
-  const { h: eh, m: em } = parseHM(s.work_end);
-  const start = new Date(now); start.setHours(sh, sm, 0, 0);
-  const end = new Date(now); end.setHours(eh, em, 0, 0);
-
-  if (now < start) {
-    next = start; // first tick at work start
-  } else if (now >= end) {
-    // Move to next workday start (skipping disabled days)
-    let tomorrow = new Date(now);
-    do {
-      tomorrow.setDate(tomorrow.getDate() + 1);
-    } while (!isWorkTime(new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), sh, sm)) && !isFinite(sh));
-    tomorrow.setHours(sh, sm, 0, 0);
-    next = tomorrow;
-  }
-
+  if (tickerHandle) { try { clearTimeout(tickerHandle); } catch {} tickerHandle = null; }
   const tick = () => {
-    const boundary = new Date(); // slot boundary (start of new slot)
+    const boundary = new Date();
     if (isWorkTime(boundary)) {
       const gran = getSlotMinutes();
-      const currentStart = currentSlotStart(boundary); // start of slot that just began
-      const prevStart = new Date(currentStart.getTime() - gran * 60000); // slot that just finished
-      // Debug: log both previous and current slot boundaries to verify we are enqueueing the START of the finished slot
-      try {
-        console.log('[main] tick boundary', {
-          boundary: boundary.toISOString(),
-          gran,
-          currentStart: slotKey(currentStart),
-          prevStart: slotKey(prevStart)
-        });
-      } catch { /* ignore logging errors */ }
-
-      // Re-evaluate working window for this boundary (in case settings changed mid-day)
+      const currentStart = currentSlotStart(boundary);
+      const prevStart = new Date(currentStart.getTime() - gran * 60000);
+      try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, currentStart: slotKey(currentStart), prevStart: slotKey(prevStart) }); } catch {}
       const sDyn = getSettings();
       const { h: dsh, m: dsm } = parseHM(sDyn.work_start);
       const { h: deh, m: dem } = parseHM(sDyn.work_end);
       const dayStart = new Date(boundary); dayStart.setHours(dsh, dsm, 0, 0);
       const dayEnd = new Date(boundary); dayEnd.setHours(deh, dem, 0, 0);
-
       if (prevStart >= dayStart && prevStart < dayEnd) {
         const key = slotKey(prevStart);
         pending.add(key);
         try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch {}
         notifyForSlot(prevStart);
         if (sDyn.auto_focus_on_slot && win) {
-          try { if (win.isMinimized()) win.restore(); } catch { }
-          try { win.show(); } catch { }
-          try { win.focus(); } catch { }
-          try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 350); } catch { }
+          try { if (win.isMinimized()) win.restore(); } catch {}
+          try { win.show(); } catch {}
+          try { win.focus(); } catch {}
+          try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 350); } catch {}
           console.log('[main] auto-focus tick -> prompt:open', key);
-          win.webContents.send('prompt:open', { slot: key });
+          win?.webContents.send('prompt:open', { slot: key });
         }
       }
     }
-    const n = nextQuarter(new Date());
-    setTimeout(tick, n.getTime() - Date.now());
+    tickerHandle = setTimeout(tick, nextQuarter(new Date()).getTime() - Date.now());
   };
+  tickerHandle = setTimeout(tick, nextQuarter(new Date()).getTime() - Date.now());
+}
 
-  setTimeout(tick, next.getTime() - Date.now());
+function restartTickerIfWorkdayNow() {
+  const now = new Date();
+  if (isWorkdayEnabled(now)) scheduleTicker();
 }
 
 function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boolean } = {}) {
@@ -160,7 +125,13 @@ function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boo
   const day = toLocalDateYMD(now);
   const done = new Set(getDayEntries(day).map((e: any) => `${e.day}T${e.start}`));
   pending.clear();
-  for (const slot of daySlots(now)) {
+  const slots = daySlots(now); // already filtered by workday
+  if (!slots.length) {
+    // Non-workday: notify renderer of empty queue
+    win?.webContents.send('queue:updated');
+    return;
+  }
+  for (const slot of slots) {
     if (!includeFuture && slot.getTime() >= now.getTime()) break; // stop at first future slot
     const key = slotKey(slot);
     if (!done.has(key)) pending.add(key);
@@ -174,7 +145,12 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeF
   const day = toLocalDateYMD(now);
   const existing = new Set(getDayEntries(day).map((e: any) => `${e.day}T${e.start}`));
   pending.clear();
-  for (const slot of daySlots(now)) {
+  const slots = daySlots(now);
+  if (!slots.length) {
+    win?.webContents.send('queue:updated');
+    return;
+  }
+  for (const slot of slots) {
     const key = slotKey(slot);
     if (existing.has(key)) continue; // already logged
     if (!includeFuture && slot.getTime() >= now.getTime()) break; // stop adding at first future slot
@@ -199,10 +175,29 @@ ipcMain.handle('db:get-recent-today', (_e, limit?: number) =>
 // Settings handlers (missing previously)
 ipcMain.handle('db:get-settings', () => { const s = getSettings(); return s; });
 ipcMain.handle('db:save-settings', (_e, s) => {
+  const before = getSettings();
   saveSettings(s);
+  const after = getSettings();
   // Recalculate backlog for already elapsed slots only; future slots will be added by the ticker.
   rebuildPendingAfterSettingsChange({ includeFuture: false });
-  return { ok: true, settings: getSettings() };
+  // If today was previously disabled and is now enabled, restart ticker + optional catch-up notification
+  const now = new Date();
+  const wasEnabled = (before.weekdays_mask & (1 << now.getDay())) !== 0;
+  const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
+  if (!wasEnabled && isEnabled && isWorkTime(now)) {
+    // Emit catch-up for the previous slot
+    const gran = getSlotMinutes();
+    const prevStart = new Date(currentSlotStart(now).getTime() - gran * 60000);
+    const key = slotKey(prevStart);
+    if (!pending.has(key)) {
+      pending.add(key);
+      notifyForSlot(prevStart);
+      win?.webContents.send('prompt:open', { slot: key });
+      win?.webContents.send('queue:updated');
+    }
+  }
+  restartTickerIfWorkdayNow();
+  return { ok: true, settings: after };
 });
 
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
@@ -213,7 +208,10 @@ ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
     const [y, m, d] = day.split('-').map(Number);
     const [hh, mm] = start.split(':').map(Number);
     const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
-    if (slotDate.getTime() < Date.now()) {
+    const now = new Date();
+    const isToday = day === toLocalDateYMD(now);
+    const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isWorkdayEnabled(slotDate);
+    if (shouldRequeue) {
       pending.add(`${day}T${start}`);
       win?.webContents.send('queue:updated');
     }

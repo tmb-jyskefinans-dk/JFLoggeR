@@ -20,6 +20,15 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
 
   showAll = false;
   allSlots = this.ipc.pendingSlots;
+  // Parsed slot objects for improved readability in template
+  private weekdayNames = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
+  slotList = computed(() => this.allSlots().map(k => {
+    const [day, time] = k.split('T');
+    const [y,m,d] = day.split('-').map(Number);
+    const dt = new Date(y, (m||1)-1, d||1);
+    const weekday = this.weekdayNames[dt.getDay()];
+    return { key: k, day, time, weekday };
+  }));
   recent = this.ipc.recent;
 
   selectedSlots = signal<string[]>([]);

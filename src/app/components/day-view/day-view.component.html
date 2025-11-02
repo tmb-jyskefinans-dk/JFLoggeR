@@ -2,8 +2,8 @@
   <!-- Left column: Selected day entries -->
   <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-6 text-slate-700 dark:text-slate-200">
     <div class="flex items-center justify-between mb-2">
-  <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100">Dag: {{ day() }}</h2>
-  <a [routerLink]="['/summary', day()]" class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600" aria-label="Vis opsummering for {{day()}}">Se opsummering</a>
+  <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100">Dag: <span class="font-medium text-indigo-600 dark:text-indigo-300">{{ formattedDay() }}</span></h2>
+  <a [routerLink]="['/summary', day()]" class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600" aria-label="Vis opsummering for {{formattedDay()}}">Se opsummering</a>
     </div>
     <div class="overflow-auto mt-4 max-h-[55vh]">
       <table class="min-w-full text-sm" aria-label="Entries for {{day()}}">
@@ -49,9 +49,11 @@
     </h3>
   <div class="overflow-auto max-h-[55vh] pr-1" aria-label="Andre registrerede dage">
       <ul class="text-sm space-y-1">
-        @for(d of days(); track d) {
+        @for(d of daysWithWeekday(); track d.day) {
           <li class="py-1 flex items-center justify-between">
-            <a class="underline hover:text-indigo-600 dark:text-indigo-300 dark:hover:text-indigo-200" [routerLink]="['/day', d.day]">{{d.day}}</a>
+            <a class="underline hover:text-indigo-600 dark:text-indigo-300 dark:hover:text-indigo-200" [routerLink]="['/day', d.day]">
+              <span class="text-indigo-600 dark:text-indigo-300 font-semibold">{{d.weekday}}</span> {{d.day}}
+            </a>
             <span class="text-xs text-slate-500 dark:text-slate-400">{{d.slots}} intervaller</span>
           </li>
         }

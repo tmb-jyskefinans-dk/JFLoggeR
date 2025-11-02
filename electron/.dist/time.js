@@ -59,6 +59,9 @@ function nextQuarter(now = new Date()) {
 function daySlots(date = new Date()) {
     const s = (0, db_1.getSettings)();
     const gran = getSlotMinutes();
+    // Respect configured working days; return empty when disabled for this date.
+    if (!isWorkdayEnabled(date))
+        return [];
     const { h: sh, m: sm } = parseHM(s.work_start);
     const { h: eh, m: em } = parseHM(s.work_end);
     const start = new Date(date);

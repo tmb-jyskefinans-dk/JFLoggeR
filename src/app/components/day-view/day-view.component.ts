@@ -22,6 +22,20 @@ export class DayViewComponent  {
   entries = computed(() => this.ipc.dayEntries());
   days = computed(() => this.ipc.days());
 
+  private weekdayNames = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
+  formattedDay = computed(() => {
+    const ymd = this.day();
+    if (!ymd) return '';
+    const [y,m,d] = ymd.split('-').map(Number);
+    const dt = new Date(y, (m||1)-1, d||1);
+    return `${this.weekdayNames[dt.getDay()]} ${ymd}`;
+  });
+  daysWithWeekday = computed(() => this.days().map(d => {
+    const [y,m,dd] = d.day.split('-').map(Number);
+    const dt = new Date(y,(m||1)-1,dd||1);
+    return { ...d, weekday: this.weekdayNames[dt.getDay()] };
+  }));
+
   // Optional computed: count of entries (could drive badge etc.)
   entryCount = computed(() => this.entries().length);
 

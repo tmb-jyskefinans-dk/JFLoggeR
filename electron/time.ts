@@ -56,6 +56,8 @@ export function nextQuarter(now = new Date()) {
 export function daySlots(date = new Date()) {
   const s = getSettings();
   const gran = getSlotMinutes();
+  // Respect configured working days; return empty when disabled for this date.
+  if (!isWorkdayEnabled(date)) return [];
   const { h: sh, m: sm } = parseHM(s.work_start);
   const { h: eh, m: em } = parseHM(s.work_end);
 
