@@ -12,6 +12,7 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     getRecentToday: (limit) => electron_1.ipcRenderer.invoke('db:get-recent-today', limit),
     getSettings: () => electron_1.ipcRenderer.invoke('db:get-settings'),
     saveSettings: (s) => electron_1.ipcRenderer.invoke('db:save-settings', s),
+    deleteEntry: (day, start) => electron_1.ipcRenderer.invoke('db:delete-entry', day, start),
     // Backlog queue
     getPendingSlots: () => electron_1.ipcRenderer.invoke('queue:get'),
     submitSlots: (payload) => electron_1.ipcRenderer.invoke('queue:submit', payload),

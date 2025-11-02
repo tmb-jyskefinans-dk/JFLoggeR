@@ -216,6 +216,22 @@ electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
     rebuildPendingAfterSettingsChange({ includeFuture: false });
     return { ok: true, settings: (0, db_1.getSettings)() };
 });
+// Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
+electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
+    const removed = (0, db_1.deleteEntry)(day, start);
+    try {
+        // If the slot is in the past (earlier than now), add back to pending so user can re-log
+        const [y, m, d] = day.split('-').map(Number);
+        const [hh, mm] = start.split(':').map(Number);
+        const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+        if (slotDate.getTime() < Date.now()) {
+            pending.add(`${day}T${start}`);
+            win?.webContents.send('queue:updated');
+        }
+    }
+    catch { /* ignore parse errors */ }
+    return { ok: true, removed };
+});
 electron_1.ipcMain.handle('queue:get', () => Array.from(pending).sort());
 electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
     const groupedByDay = new Map();

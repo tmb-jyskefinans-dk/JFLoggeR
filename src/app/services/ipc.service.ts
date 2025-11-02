@@ -13,6 +13,7 @@ declare global {
       getSettings(): Promise<any>;
       saveSettings(settings: any): Promise<void>;
       submitSlots(payload: { slots: string[], description: string, category: string }): Promise<{ ok: boolean }>;
+  deleteEntry(day: string, start: string): Promise<{ ok: boolean, removed?: number }>;
       onPrompt(cb: (d: any) => void): void;
   onFocus(cb: () => void): void;
   onAppReady?: (cb: () => void) => void;
@@ -102,6 +103,17 @@ export class IpcService {
   submitPending(slots: string[], description: string, category: string) {
     return window.workApi.submitSlots({ slots, description, category })
       .then(() => { this.loadPending(); this.refreshDays(); });
+  }
+
+  deleteEntry(day: string, start: string) {
+    return window.workApi.deleteEntry(day, start)
+      .then(() => {
+        // Refresh affected signals so UI updates immediately
+        this.loadDay(day);
+        this.refreshDays();
+        this.loadPending(); // slot may have been re-queued if in past
+      })
+      .catch(err => console.error('[ipc] deleteEntry failed', err));
   }
 
   // Convenience wrapper for debug notification trigger

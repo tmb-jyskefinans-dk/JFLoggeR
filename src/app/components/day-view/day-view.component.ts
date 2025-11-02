@@ -41,4 +41,9 @@ export class DayViewComponent  {
   constructor() {
     this.ipc.getDays().then(list => { /* service will set its signal; no manual set needed */ });
   }
+
+  remove(e: any) {
+    if (!e || !e.day || !e.start) return;
+    this.ipc.deleteEntry(e.day, e.start);
+  }
 }

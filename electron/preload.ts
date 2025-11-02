@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('workApi', {
   getRecentToday: (limit?: number) => ipcRenderer.invoke('db:get-recent-today', limit),
   getSettings: () => ipcRenderer.invoke('db:get-settings'),
   saveSettings: (s: any) => ipcRenderer.invoke('db:save-settings', s),
+  deleteEntry: (day: string, start: string) => ipcRenderer.invoke('db:delete-entry', day, start),
 
   // Backlog queue
   getPendingSlots: () => ipcRenderer.invoke('queue:get'),

@@ -11,7 +11,8 @@ import {
   getDistinctRecent,
   getDistinctRecentToday,
   getSettings,
-  saveSettings
+  saveSettings,
+  deleteEntry
 } from './db';
 
 import {
@@ -202,6 +203,22 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   // Recalculate backlog for already elapsed slots only; future slots will be added by the ticker.
   rebuildPendingAfterSettingsChange({ includeFuture: false });
   return { ok: true, settings: getSettings() };
+});
+
+// Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
+ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
+  const removed = deleteEntry(day, start);
+  try {
+    // If the slot is in the past (earlier than now), add back to pending so user can re-log
+    const [y, m, d] = day.split('-').map(Number);
+    const [hh, mm] = start.split(':').map(Number);
+    const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+    if (slotDate.getTime() < Date.now()) {
+      pending.add(`${day}T${start}`);
+      win?.webContents.send('queue:updated');
+    }
+  } catch { /* ignore parse errors */ }
+  return { ok: true, removed };
 });
 
 

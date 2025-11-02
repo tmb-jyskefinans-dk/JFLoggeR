@@ -9,6 +9,7 @@ exports.getDays = getDays;
 exports.getSummary = getSummary;
 exports.getDistinctRecent = getDistinctRecent;
 exports.getDistinctRecentToday = getDistinctRecentToday;
+exports.deleteEntry = deleteEntry;
 exports.ensureDayCreated = ensureDayCreated;
 exports.lastNEntries = lastNEntries;
 const tslib_1 = require("tslib");
@@ -197,6 +198,18 @@ function getDistinctRecentToday(limit = 20) {
     return Array.from(grouped.values())
         .sort((a, b) => b.last_used.localeCompare(a.last_used))
         .slice(0, limit);
+}
+/** Delete a single entry by (day,start). Returns number of removed entries. */
+function deleteEntry(day, start) {
+    ensureDb();
+    db.read();
+    const before = db.data.entries.length;
+    db.data.entries = db.data.entries.filter(e => !(e.day === day && e.start === start));
+    if (db.data.entries.length !== before) {
+        db.write();
+        return 1;
+    }
+    return 0;
 }
 /** Convenience (kept for API parity) */
 function ensureDayCreated(day) { return day; }

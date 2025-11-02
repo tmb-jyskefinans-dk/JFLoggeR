@@ -13,6 +13,7 @@
             <th scope="col" class="text-left">Slut</th>
             <th scope="col" class="text-left">Beskrivelse</th>
             <th scope="col" class="text-left">Kategori</th>
+            <th scope="col" class="text-left" aria-label="Handlinger"></th>
           </tr>
         </thead>
         <tbody class="divide-y">
@@ -22,6 +23,14 @@
               <td>{{e.end}}</td>
               <td>{{e.description}}</td>
               <td>{{e.category}}</td>
+              <td>
+                <button type="button"
+                        (click)="remove(e)"
+                        class="text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 rounded focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                        aria-label="Slet interval {{e.start}}">
+                  <span aria-hidden="true">×</span>
+                </button>
+              </td>
             </tr>
           }
         </tbody>

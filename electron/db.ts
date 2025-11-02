@@ -217,6 +217,19 @@ export function getDistinctRecentToday(limit = 20) {
     .slice(0, limit);
 }
 
+/** Delete a single entry by (day,start). Returns number of removed entries. */
+export function deleteEntry(day: string, start: string) {
+  ensureDb();
+  db.read();
+  const before = db.data!.entries.length;
+  db.data!.entries = db.data!.entries.filter(e => !(e.day === day && e.start === start));
+  if (db.data!.entries.length !== before) {
+    db.write();
+    return 1;
+  }
+  return 0;
+}
+
 /** Convenience (kept for API parity) */
 export function ensureDayCreated(day?: string) { return day; }
 export function lastNEntries(n = 8) {

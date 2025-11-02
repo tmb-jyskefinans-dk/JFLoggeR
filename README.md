@@ -134,6 +134,10 @@ If notifications don't appear on Windows:
 
 The Electron entry point is defined as `electron/main.js` (compiled from `electron/main.ts`). The production renderer assets resolve to `dist/work-logger/browser/index.html` which the main process loads when `VITE_DEV_SERVER_URL` is not set.
 
+### Deleting a logged interval
+
+You can now delete an individual logged work slot from the Day view. Click the `×` button at the end of the row. If the deleted slot is in the past, it is re-added to the pending queue so you can re-log it with a different description/category. Deletion immediately refreshes the Day and Summary views.
+
 ## Running unit tests
 
 To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
