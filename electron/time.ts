@@ -53,6 +53,14 @@ export function nextQuarter(now = new Date()) {
   return d;
 }
 
+/** Start time of the previous slot (the slot that just finished at the current boundary). */
+export function previousSlotStart(now = new Date()) {
+  const gran = getSlotMinutes();
+  // Subtract gran minutes then snap to slot boundary using currentSlotStart logic.
+  const prior = new Date(now.getTime() - gran * 60000);
+  return currentSlotStart(prior);
+}
+
 export function daySlots(date = new Date()) {
   const s = getSettings();
   const gran = getSlotMinutes();

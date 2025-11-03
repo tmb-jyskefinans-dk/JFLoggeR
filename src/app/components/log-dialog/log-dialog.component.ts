@@ -60,17 +60,6 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
       this.selectedSlots.set(list.slice(0, 1));
     }
     this.ipc.loadRecent();
-    // Reactive safeguard: if the prompt slot arrives AFTER dialog creation (race), select it.
-    effect(() => {
-      const ps = this.ipc.lastPromptSlot();
-      const pending = this.ipc.pendingSlots();
-      if (!ps) return;
-      const currentSel = this.selectedSlots();
-      // Only adjust if prompt slot is pending and either not selected or selection is empty.
-      if (pending.includes(ps) && (currentSel.length === 0 || !currentSel.includes(ps))) {
-        this.selectedSlots.set([ps]);
-      }
-    });
   }
 
   ngAfterViewInit() {
@@ -111,4 +100,16 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     this.description = ''; this.category = ''; this.selectedSlots.set([]);
     this.closed.emit();
   }
+
+  // Reactive safeguard: if the prompt slot arrives AFTER dialog creation (race), select it.
+  private promptSlotSync = effect(() => {
+    const ps = this.ipc.lastPromptSlot();
+    const pending = this.ipc.pendingSlots();
+    if (!ps) return;
+    const currentSel = this.selectedSlots();
+    // Only adjust if prompt slot is pending and either not selected or selection is empty.
+    if (pending.includes(ps) && (currentSel.length === 0 || !currentSel.includes(ps))) {
+      this.selectedSlots.set([ps]);
+    }
+  });
 }

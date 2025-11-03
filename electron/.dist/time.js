@@ -7,6 +7,7 @@ exports.isWorkdayEnabled = isWorkdayEnabled;
 exports.isWorkTime = isWorkTime;
 exports.currentSlotStart = currentSlotStart;
 exports.nextQuarter = nextQuarter;
+exports.previousSlotStart = previousSlotStart;
 exports.daySlots = daySlots;
 exports.slotKey = slotKey;
 // electron/time.ts
@@ -55,6 +56,13 @@ function nextQuarter(now = new Date()) {
     const minutes = Math.floor(d.getMinutes() / gran) * gran + gran;
     d.setMinutes(minutes, 0, 0);
     return d;
+}
+/** Start time of the previous slot (the slot that just finished at the current boundary). */
+function previousSlotStart(now = new Date()) {
+    const gran = getSlotMinutes();
+    // Subtract gran minutes then snap to slot boundary using currentSlotStart logic.
+    const prior = new Date(now.getTime() - gran * 60000);
+    return currentSlotStart(prior);
 }
 function daySlots(date = new Date()) {
     const s = (0, db_1.getSettings)();

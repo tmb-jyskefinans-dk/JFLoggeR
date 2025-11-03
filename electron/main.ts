@@ -18,6 +18,7 @@ import {
 import {
   nextQuarter,
   currentSlotStart,
+  previousSlotStart,
   isWorkTime,
   isWorkdayEnabled,
   slotKey,
@@ -103,29 +104,36 @@ function notifyForSlot(slot: Date) {
 function scheduleTicker() {
   if (tickerHandle) { try { clearTimeout(tickerHandle); } catch {} tickerHandle = null; }
   const tick = () => {
-    const boundary = new Date();
+    const boundary = new Date(); // This is the start of the NEW slot
     if (isWorkTime(boundary)) {
       const gran = getSlotMinutes();
-      const currentStart = currentSlotStart(boundary);
-      try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, currentStart: slotKey(currentStart) }); } catch {}
+      const prevStart = previousSlotStart(boundary); // Slot that just finished
+      try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, prevStart: slotKey(prevStart) }); } catch {}
       const sDyn = getSettings();
       const { h: dsh, m: dsm } = parseHM(sDyn.work_start);
       const { h: deh, m: dem } = parseHM(sDyn.work_end);
       const dayStart = new Date(boundary); dayStart.setHours(dsh, dsm, 0, 0);
       const dayEnd = new Date(boundary); dayEnd.setHours(deh, dem, 0, 0);
-      // At slot boundary we now prompt for the CURRENT slot (start just begun) instead of the one that finished.
-      if (currentStart >= dayStart && currentStart < dayEnd) {
-        const key = slotKey(currentStart);
-        pending.add(key);
-        try { console.log('[main] enqueue currentStart', key, 'pending size', pending.size); } catch {}
-        notifyForSlot(currentStart);
-        if (sDyn.auto_focus_on_slot && win) {
-          try { if (win.isMinimized()) win.restore(); } catch {}
-          try { win.show(); } catch {}
-          try { win.focus(); } catch {}
-          try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 350); } catch {}
-          console.log('[main] auto-focus tick -> prompt:open (current slot)', key);
-          win?.webContents.send('prompt:open', { slot: key });
+      // Prompt for the slot that FINISHED (prevStart) if it lies fully within work hours.
+      if (prevStart >= dayStart && prevStart < dayEnd) {
+        const key = slotKey(prevStart);
+        // Guard against re-queueing already logged slot
+        const day = toLocalDateYMD(prevStart);
+        const hh = `${prevStart.getHours()}`.padStart(2,'0');
+        const mm = `${prevStart.getMinutes()}`.padStart(2,'0');
+        const alreadyLogged = getDayEntries(day).some(e => e.day === day && e.start === `${hh}:${mm}`);
+        if (!alreadyLogged) {
+          if (!pending.has(key)) pending.add(key);
+          try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch {}
+          notifyForSlot(prevStart);
+          if (sDyn.auto_focus_on_slot && win) {
+            try { if (win.isMinimized()) win.restore(); } catch {}
+            try { win.show(); } catch {}
+            try { win.focus(); } catch {}
+            try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 350); } catch {}
+            console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
+            win?.webContents.send('prompt:open', { slot: key });
+          }
         }
       }
     }
@@ -204,17 +212,7 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   const now = new Date();
   const wasEnabled = (before.weekdays_mask & (1 << now.getDay())) !== 0;
   const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
-  if (!wasEnabled && isEnabled && isWorkTime(now)) {
-    // Emit catch-up for the current slot (we switched to logging at start of interval)
-    const currentStart = currentSlotStart(now);
-    const key = slotKey(currentStart);
-    if (!pending.has(key)) {
-      pending.add(key);
-      notifyForSlot(currentStart);
-      win?.webContents.send('prompt:open', { slot: key });
-      win?.webContents.send('queue:updated');
-    }
-  }
+  // When enabling mid-workday we now WAIT until next boundary (end of current slot) instead of immediate catch-up.
   restartTickerIfWorkdayNow();
   return { ok: true, settings: after };
 });
