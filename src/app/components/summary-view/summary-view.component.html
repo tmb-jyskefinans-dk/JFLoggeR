@@ -2,6 +2,10 @@
   <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100 flex items-center gap-2">
   <span>Opsummering for</span>
     <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200 text-sm font-medium" aria-label="Selected day">{{day()}}</span>
+    <button (click)="exportExcel()" class="ml-auto inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold px-3 h-7 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" aria-label="Exportér opsummering til Excel" [disabled]="!rows().length">
+      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v4H4z"/><path d="M4 12h16v8H4z"/><path d="M4 4v16"/><path d="M10 8v8"/><path d="M14 8v8"/><path d="M4 12h16"/></svg>
+      <span>Excel</span>
+    </button>
   </h2>
   <div class="overflow-auto mt-4">
       @if(rootGroupTotals().length) {

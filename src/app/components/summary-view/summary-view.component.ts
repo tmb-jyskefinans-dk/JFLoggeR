@@ -4,6 +4,7 @@ import { ActivatedRoute } from '@angular/router';
 import { IpcService, SummaryRow } from '../../services/ipc.service';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CATEGORY_GROUPS } from '../../models/categories';
+import { ExportService } from '../../services/export.service';
 
 @Component({
   selector: 'summary-view',
@@ -15,6 +16,7 @@ import { CATEGORY_GROUPS } from '../../models/categories';
 export class SummaryViewComponent  {
   private route = inject(ActivatedRoute);
   ipc = inject(IpcService);
+  exporter = inject(ExportService);
 
   private paramMap = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
   day = computed(() => this.paramMap()?.get('ymd') ?? '');
@@ -111,5 +113,14 @@ export class SummaryViewComponent  {
         if (req === this.lastRequest) this.loading.set(false);
       });
     });
+  }
+
+  async exportExcel() {
+    const d = this.day();
+    if (!d) return;
+    const result = await this.exporter.exportDaySummary(d);
+    if (!result.ok) {
+      console.error('[summary] export failed', result.error);
+    }
   }
 }

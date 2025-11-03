@@ -11,8 +11,8 @@
     "build:renderer": "ng build --configuration production",
     "build:main": "tsc -p electron",
     "watch:main": "tsc -p electron --watch",
-  "watch:electron": "wait-on -t 90000 tcp:4200 electron/.dist/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:4200 nodemon --watch electron/.dist --exec electron electron/.dist/main.js",
-  "watch:electron:nowait": "cross-env VITE_DEV_SERVER_URL=http://localhost:4200 nodemon --watch electron/.dist --exec electron electron/.dist/main.js",
+    "watch:electron": "wait-on -t 90000 tcp:4200 electron/.dist/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:4200 nodemon --watch electron/.dist --exec electron electron/.dist/main.js",
+    "watch:electron:nowait": "cross-env VITE_DEV_SERVER_URL=http://localhost:4200 nodemon --watch electron/.dist --exec electron electron/.dist/main.js",
     "dev": "concurrently -k \"npm run serve:renderer\" \"npm run watch:main\"  \"npm run watch:electron\"",
     "clean": "rimraf dist electron/.dist",
     "build": "npm run build:renderer && npm run build:main",
@@ -63,6 +63,7 @@
     "rxjs": "~7.8.0",
     "tailwindcss": "^4.1.16",
     "tslib": "^2.3.0",
+    "xlsx": "^0.18.5",
     "zone.js": "~0.15.0"
   },
   "devDependencies": {
@@ -81,6 +82,7 @@
     "@electron/remote": "^2.1.3",
     "@types/jasmine": "~5.1.0",
     "@types/jest": "^30.0.0",
+    "@types/xlsx": "^0.0.35",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
