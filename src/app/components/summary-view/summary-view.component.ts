@@ -1,6 +1,6 @@
 import { Component, inject, ChangeDetectionStrategy, signal, computed, effect } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { IpcService, SummaryRow } from '../../services/ipc.service';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CATEGORY_GROUPS } from '../../models/categories';
@@ -11,12 +11,16 @@ import { ExportService } from '../../services/export.service';
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './summary-view.component.html',
   styleUrls: ['./summary-view.component.scss'],
-  imports: [DecimalPipe]
+  imports: [DecimalPipe],
+  host: {
+    '(window:keydown)': 'onKeydown($event)'
+  }
 })
 export class SummaryViewComponent  {
   private route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   exporter = inject(ExportService);
+  private router = inject(Router);
 
   private paramMap = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
   day = computed(() => this.paramMap()?.get('ymd') ?? '');
@@ -102,6 +106,58 @@ export class SummaryViewComponent  {
   });
 
   private lastRequest = 0;
+
+  // Navigation helpers
+  // Format a Date as local YYYY-MM-DD without timezone shifting to UTC
+  private fmtLocal(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  }
+  private todayYmd(): string { return this.fmtLocal(new Date()); }
+  isToday = computed(() => this.day() === this.todayYmd());
+  prevDay = computed(() => {
+    const d = this.day();
+    if (!d) return '';
+    const parts = d.split('-');
+    if (parts.length !== 3) return '';
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    dt.setDate(dt.getDate() - 1);
+    return this.fmtLocal(dt);
+  });
+  nextDay = computed(() => {
+    const d = this.day();
+    if (!d) return '';
+    const parts = d.split('-');
+    if (parts.length !== 3) return '';
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    dt.setDate(dt.getDate() + 1);
+    const ymd = this.fmtLocal(dt);
+    // prevent navigating into future beyond today (strict greater-than)
+    return ymd > this.todayYmd() ? '' : ymd;
+  });
+
+  gotoDay(ymd: string) {
+    if (!ymd) return;
+    this.router.navigate(['/summary', ymd]);
+  }
+  gotoToday() { this.gotoDay(this.todayYmd()); }
+
+  // Keyboard shortcuts: ArrowLeft / ArrowRight for day nav, 't' for today
+  onKeydown(ev: KeyboardEvent) {
+    // Ignore if modifier keys pressed (to not clash with browser/electron shortcuts)
+    if (ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
+    if (ev.key === 'ArrowLeft') {
+      const prev = this.prevDay();
+      if (prev) { this.gotoDay(prev); ev.preventDefault(); }
+    } else if (ev.key === 'ArrowRight') {
+      const next = this.nextDay();
+      if (next) { this.gotoDay(next); ev.preventDefault(); }
+    } else if (ev.key.toLowerCase() === 't') {
+      if (!this.isToday()) { this.gotoToday(); ev.preventDefault(); }
+    }
+  }
 
   constructor() {
     effect(() => {

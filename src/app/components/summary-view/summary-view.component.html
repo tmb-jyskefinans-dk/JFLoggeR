@@ -1,13 +1,74 @@
 <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-6 text-slate-700 dark:text-slate-200">
-  <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100 flex items-center gap-2">
-  <span>Opsummering for</span>
-    <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200 text-sm font-medium" aria-label="Selected day">{{day()}}</span>
-    <button (click)="exportExcel()" class="ml-auto inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold px-3 h-7 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" aria-label="Exportér opsummering til Excel" [disabled]="!rows().length">
-      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v4H4z"/><path d="M4 12h16v8H4z"/><path d="M4 4v16"/><path d="M10 8v8"/><path d="M14 8v8"/><path d="M4 12h16"/></svg>
-      <span>Export</span>
-    </button>
-  </h2>
-  <div class="overflow-auto mt-4">
+  <!-- Top toolbar with navigation and charts -->
+  <div class="flex flex-col gap-6">
+    <div class="flex items-center gap-2 flex-wrap">
+      <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100 flex items-center gap-2">
+        <span>Opsummering</span>
+        <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200 text-sm font-medium" aria-label="Valgt dag">{{day()}}</span>
+      </h2>
+      <div class="flex items-center gap-2 ml-auto" aria-label="Dagnavigation" role="group">
+        <label class="sr-only" for="dayPicker">Vælg dag</label>
+        <input id="dayPicker" type="date" class="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 h-8 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" [value]="day()" [max]="day()" (change)="gotoDay($event.target.value)" aria-label="Vælg dato" />
+        <button type="button" (click)="gotoDay(prevDay())" [disabled]="!prevDay()" class="inline-flex items-center gap-1 rounded-md px-3 h-8 text-xs font-medium border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" aria-label="Forrige dag" title="Forrige dag (Pil venstre)">←</button>
+        <button type="button" (click)="gotoToday()" [disabled]="isToday()" class="inline-flex items-center gap-1 rounded-md px-3 h-8 text-xs font-medium border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" aria-label="Gå til i dag" title="I dag (T)">I dag</button>
+        <button type="button" (click)="gotoDay(nextDay())" [disabled]="!nextDay()" class="inline-flex items-center gap-1 rounded-md px-3 h-8 text-xs font-medium border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" aria-label="Næste dag" title="Næste dag (Pil højre)">→</button>
+        <button (click)="exportExcel()" class="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold px-3 h-8 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" aria-label="Exportér opsummering til Excel" [disabled]="!rows().length">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v4H4z"/><path d="M4 12h16v8H4z"/><path d="M4 4v16"/><path d="M10 8v8"/><path d="M14 8v8"/><path d="M4 12h16"/></svg>
+          <span>Export</span>
+        </button>
+      </div>
+    </div>
+    <!-- Charts moved to top -->
+    @if(categoryChartData().length) {
+      <div class="grid gap-6 lg:grid-cols-3" aria-label="Grafisk oversigt">
+        <!-- Horizontal bar chart spans 2 columns -->
+        <div class="lg:col-span-2">
+          <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Kategori fordeling (minutter)</h3>
+          <div class="space-y-2" role="group" aria-label="Horisontal søjlediagram over minutter pr. kategori">
+            @for(c of categoryChartData(); track c.category) {
+              <div class="flex items-center gap-2">
+                <div class="w-32 truncate text-[11px] font-medium" [style.color]="c.color">{{c.category || 'Ingen'}}</div>
+                <div class="flex-1 h-3 rounded bg-slate-200 dark:bg-slate-700 overflow-hidden" aria-hidden="true">
+                  <div class="h-full" [style.background]="c.color" [style.width.%]="c.percent" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)"></div>
+                </div>
+                <div class="w-20 text-right text-[11px] text-slate-600 dark:text-slate-300">{{c.minutes}} min</div>
+              </div>
+            }
+          </div>
+        </div>
+        <!-- Donut chart (shifted left, extra right padding for labels) -->
+        <div class="flex flex-col pr-6">
+          <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Donutdiagram</h3>
+          <figure class="flex flex-col items-start gap-2" aria-label="Donutdiagram kategori minutter">
+            <svg class="ml-2" viewBox="0 0 140 140" width="170" height="170" role="img" aria-labelledby="donutTitle donutDesc">
+              <title id="donutTitle">Kategori minutter</title>
+              <desc id="donutDesc">Fordeling af loggede minutter per kategori for valgt dag</desc>
+              <circle cx="70" cy="70" r="54" fill="none" stroke="var(--tw-color-slate-300,var(--tw-prose-body))" stroke-width="18" opacity="0.25"></circle>
+              @for(seg of donutSegments(); track seg.category) {
+                <circle cx="70" cy="70" r="54" fill="none" [attr.stroke]="seg.color" stroke-width="18" stroke-linecap="butt"
+                  [attr.stroke-dasharray]="seg.length + ' ' + (circumference - seg.length)"
+                  [attr.stroke-dashoffset]="-seg.offset" opacity="0.95">
+                  <title>{{seg.category || 'Ingen'}}: {{seg.minutes}} min ({{seg.percent|number:'1.0-1'}}%)</title>
+                </circle>
+              }
+            </svg>
+            <figcaption class="text-xs text-slate-500 dark:text-slate-400">Total: {{totalMinutes()}} min</figcaption>
+          </figure>
+          <ul class="grid xs:grid-cols-2 gap-2 mt-4 pr-2" aria-label="Kategori farve forklaring">
+            @for(c of categoryChartData(); track c.category) {
+              <li class="flex items-center gap-2 text-[11px]">
+                <span class="w-3 h-3 rounded-sm" [style.background]="c.color"></span>
+                <span class="flex-1 truncate">{{c.category || 'Ingen kategori'}}</span>
+                <span class="font-medium">{{c.minutes}} min</span>
+                <span class="text-slate-500 dark:text-slate-400">({{c.percent|number:'1.0-1'}}%)</span>
+              </li>
+            }
+          </ul>
+        </div>
+      </div>
+    }
+  </div>
+  <div class="overflow-auto mt-6">
       @if(rootGroupTotals().length) {
         <div class="mb-6">
           <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Root kategorier</h3>
@@ -34,51 +95,6 @@
                 </ul>
               </section>
             }
-          </div>
-        </div>
-      }
-      @if(categoryChartData().length) {
-        <div class="mb-8">
-          <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Kategori fordeling (minutter)</h3>
-          <!-- Horizontal bar chart -->
-          <div class="space-y-2" role="group" aria-label="Horisontal søjlediagram over minutter pr. kategori">
-            @for(c of categoryChartData(); track c.category) {
-              <div class="flex items-center gap-2">
-                <div class="w-32 truncate text-[11px] font-medium" [style.color]="c.color">{{c.category || 'Ingen'}}</div>
-                <div class="flex-1 h-3 rounded bg-slate-200 dark:bg-slate-700 overflow-hidden" aria-hidden="true">
-                  <div class="h-full" [style.background]="c.color" [style.width.%]="c.percent" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)"></div>
-                </div>
-                <div class="w-20 text-right text-[11px] text-slate-600 dark:text-slate-300">{{c.minutes}} min</div>
-              </div>
-            }
-          </div>
-          <!-- Donut chart -->
-          <div class="mt-6 flex flex-col lg:flex-row gap-6">
-            <figure class="flex flex-col items-center gap-2" aria-label="Donutdiagram kategori minutter">
-              <svg viewBox="0 0 140 140" width="180" height="180" role="img" aria-labelledby="donutTitle donutDesc">
-                <title id="donutTitle">Kategori minutter</title>
-                <desc id="donutDesc">Fordeling af loggede minutter per kategori for valgt dag</desc>
-                <circle cx="70" cy="70" r="54" fill="none" stroke="var(--tw-color-slate-300,var(--tw-prose-body))" stroke-width="18" opacity="0.25"></circle>
-                @for(seg of donutSegments(); track seg.category) {
-      <circle cx="70" cy="70" r="54" fill="none" [attr.stroke]="seg.color" stroke-width="18" stroke-linecap="butt"
-        [attr.stroke-dasharray]="seg.length + ' ' + (circumference - seg.length)"
-                          [attr.stroke-dashoffset]="-seg.offset" opacity="0.95">
-                    <title>{{seg.category || 'Ingen'}}: {{seg.minutes}} min ({{seg.percent|number:'1.0-1'}}%)</title>
-                  </circle>
-                }
-              </svg>
-              <figcaption class="text-xs text-slate-500 dark:text-slate-400">Total: {{totalMinutes()}} min</figcaption>
-            </figure>
-            <ul class="grid xs:grid-cols-2 gap-2 flex-1" aria-label="Kategori farve forklaring">
-              @for(c of categoryChartData(); track c.category) {
-                <li class="flex items-center gap-2 text-[11px]">
-                  <span class="w-3 h-3 rounded-sm" [style.background]="c.color"></span>
-                  <span class="flex-1 truncate">{{c.category || 'Ingen kategori'}}</span>
-                  <span class="font-medium">{{c.minutes}} min</span>
-                  <span class="text-slate-500 dark:text-slate-400">({{c.percent|number:'1.0-1'}}%)</span>
-                </li>
-              }
-            </ul>
           </div>
         </div>
       }
