@@ -39,5 +39,11 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
       'Udvikling (prioriterede jf. projektoversigten)',
       'Estimering'
     ]
+  },
+  {
+    label: 'Andet',
+    items: [
+      'Frokost',
+    ]
   }
 ];

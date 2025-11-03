@@ -106,6 +106,9 @@ export class SummaryViewComponent  {
   });
 
   private lastRequest = 0;
+  private initialized = false;
+  private toastTimeout: any = null;
+  toast = signal<string | null>(null);
 
   // Navigation helpers
   // Format a Date as local YYYY-MM-DD without timezone shifting to UTC
@@ -168,6 +171,12 @@ export class SummaryViewComponent  {
       this.ipc.loadDay(d).finally(() => {
         if (req === this.lastRequest) this.loading.set(false);
       });
+      // Day change toast (skip first initialization)
+      if (this.initialized) {
+        this.showToast(`Dag ændret til ${d}`);
+      } else {
+        this.initialized = true;
+      }
     });
   }
 
@@ -178,5 +187,13 @@ export class SummaryViewComponent  {
     if (!result.ok) {
       console.error('[summary] export failed', result.error);
     }
+  }
+
+  private showToast(msg: string) {
+    this.toast.set(msg);
+    clearTimeout(this.toastTimeout);
+    this.toastTimeout = setTimeout(() => {
+      this.toast.set(null);
+    }, 3000);
   }
 }

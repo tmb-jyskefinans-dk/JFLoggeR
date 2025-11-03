@@ -1,4 +1,12 @@
 <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-6 text-slate-700 dark:text-slate-200">
+  @if(toast()) {
+    <div class="fixed bottom-4 right-4 z-50 select-none">
+      <div class="rounded-md bg-slate-900/90 dark:bg-slate-900 text-white px-4 py-2 text-xs shadow-lg flex items-center gap-2 animate-fade-in" role="status" aria-live="polite">
+        <svg class="w-3.5 h-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 16h-1v-4h-1"/><path d="M12 8h.01"/><circle cx="12" cy="12" r="10"/></svg>
+        <span>{{toast()}}</span>
+      </div>
+    </div>
+  }
   <!-- Top toolbar with navigation and charts -->
   <div class="flex flex-col gap-6">
     <div class="flex items-center gap-2 flex-wrap">
@@ -21,26 +29,10 @@
     <!-- Charts moved to top -->
     @if(categoryChartData().length) {
       <div class="grid gap-6 lg:grid-cols-3" aria-label="Grafisk oversigt">
-        <!-- Horizontal bar chart spans 2 columns -->
-        <div class="lg:col-span-2">
-          <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Kategori fordeling (minutter)</h3>
-          <div class="space-y-2" role="group" aria-label="Horisontal søjlediagram over minutter pr. kategori">
-            @for(c of categoryChartData(); track c.category) {
-              <div class="flex items-center gap-2">
-                <div class="w-32 truncate text-[11px] font-medium" [style.color]="c.color">{{c.category || 'Ingen'}}</div>
-                <div class="flex-1 h-3 rounded bg-slate-200 dark:bg-slate-700 overflow-hidden" aria-hidden="true">
-                  <div class="h-full" [style.background]="c.color" [style.width.%]="c.percent" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)"></div>
-                </div>
-                <div class="w-20 text-right text-[11px] text-slate-600 dark:text-slate-300">{{c.minutes}} min</div>
-              </div>
-            }
-          </div>
-        </div>
-        <!-- Donut chart (shifted left, extra right padding for labels) -->
-        <div class="flex flex-col pr-6">
-          <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Donutdiagram</h3>
+        <!-- Donut chart now first (left) -->
+        <div class="flex flex-col lg:col-span-1 pr-2">
           <figure class="flex flex-col items-start gap-2" aria-label="Donutdiagram kategori minutter">
-            <svg class="ml-2" viewBox="0 0 140 140" width="170" height="170" role="img" aria-labelledby="donutTitle donutDesc">
+            <svg class="" viewBox="0 0 140 140" width="160" height="160" role="img" aria-labelledby="donutTitle donutDesc">
               <title id="donutTitle">Kategori minutter</title>
               <desc id="donutDesc">Fordeling af loggede minutter per kategori for valgt dag</desc>
               <circle cx="70" cy="70" r="54" fill="none" stroke="var(--tw-color-slate-300,var(--tw-prose-body))" stroke-width="18" opacity="0.25"></circle>
@@ -54,16 +46,31 @@
             </svg>
             <figcaption class="text-xs text-slate-500 dark:text-slate-400">Total: {{totalMinutes()}} min</figcaption>
           </figure>
-          <ul class="grid xs:grid-cols-2 gap-2 mt-4 pr-2" aria-label="Kategori farve forklaring">
+          <ul class="grid xs:grid-cols-2 gap-2 mt-4 pr-3 pl-2" aria-label="Kategori farve forklaring">
             @for(c of categoryChartData(); track c.category) {
-              <li class="flex items-center gap-2 text-[11px]">
-                <span class="w-3 h-3 rounded-sm" [style.background]="c.color"></span>
-                <span class="flex-1 truncate">{{c.category || 'Ingen kategori'}}</span>
-                <span class="font-medium">{{c.minutes}} min</span>
-                <span class="text-slate-500 dark:text-slate-400">({{c.percent|number:'1.0-1'}}%)</span>
+              <li class="flex items-center gap-2 text-[11px] px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors overflow-hidden">
+                <span class="w-3 h-3 rounded-sm shrink-0" [style.background]="c.color"></span>
+                <span class="flex-1 truncate" title="{{c.category || 'Ingen kategori'}}">{{c.category || 'Ingen kategori'}}</span>
+                <span class="font-medium shrink-0">{{c.minutes}} min</span>
+                <span class="text-slate-500 dark:text-slate-400 shrink-0">({{c.percent|number:'1.0-1'}}%)</span>
               </li>
             }
           </ul>
+        </div>
+        <!-- Horizontal bar chart spans remaining two columns -->
+        <div class="lg:col-span-2">
+          <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Kategori fordeling (minutter)</h3>
+          <div class="space-y-2" role="group" aria-label="Horisontal søjlediagram over minutter pr. kategori">
+            @for(c of categoryChartData(); track c.category) {
+              <div class="flex items-center gap-2">
+                <div class="w-32 truncate text-[11px] font-medium" [style.color]="c.color">{{c.category || 'Ingen'}}</div>
+                <div class="flex-1 h-3 rounded bg-slate-200 dark:bg-slate-700 overflow-hidden" aria-hidden="true">
+                  <div class="h-full" [style.background]="c.color" [style.width.%]="c.percent" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)"></div>
+                </div>
+                <div class="w-20 text-right text-[11px] text-slate-600 dark:text-slate-300">{{c.minutes}} min</div>
+              </div>
+            }
+          </div>
         </div>
       </div>
     }
