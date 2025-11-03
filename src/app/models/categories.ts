@@ -43,7 +43,7 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
   {
     label: 'Andet',
     items: [
-      'Frokost',
+      'Andet',
     ]
   }
 ];

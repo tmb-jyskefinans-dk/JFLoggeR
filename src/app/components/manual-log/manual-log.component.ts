@@ -18,6 +18,7 @@ export class ManualLogComponent {
   end = '09:00';
   description = '';
   category = '';
+  andetDescription = '';
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
   unmatchedCategory(): boolean {
     const c = this.category?.trim();
@@ -44,9 +45,13 @@ export class ManualLogComponent {
     const novel = slots.filter(k => !done.has(k));
     if (!novel.length) { this.error.set('No new slots to save.'); return; }
 
-    await this.ipc.submitPending(novel, this.description, this.category);
+    let finalDescription = this.description;
+    if (this.category === 'Andet' && this.andetDescription.trim()) {
+      finalDescription = this.andetDescription.trim();
+    }
+    await this.ipc.submitPending(novel, finalDescription, this.category);
     // Refresh signals for the affected day so Today/Day/Summary views update instantly
     this.ipc.loadDay(this.date);
-    this.description=''; this.category='';
+  this.description=''; this.category=''; this.andetDescription='';
   }
 }

@@ -39,6 +39,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   });
   description = '';
   category = '';
+  andetDescription = '';
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
   unmatchedCategory(): boolean {
     const c = this.category?.trim();
@@ -91,13 +92,20 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   }
   async submit() {
     const slots = this.selectedSlots();
-    await this.ipc.submitPending(slots, this.description, this.category);
+    let finalDescription = this.description;
+    if (this.category === 'Andet' && this.andetDescription.trim()) {
+      finalDescription = this.andetDescription.trim();
+    }
+    await this.ipc.submitPending(slots, finalDescription, this.category);
     // Derive affected day from first slot and trigger reload of day & summary signals
     if (slots.length) {
       const day = slots[0].split('T')[0];
       this.ipc.loadDay(day);
     }
-    this.description = ''; this.category = ''; this.selectedSlots.set([]);
+    this.description = '';
+    this.category = '';
+    this.andetDescription = '';
+    this.selectedSlots.set([]);
     this.closed.emit();
   }
 

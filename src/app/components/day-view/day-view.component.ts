@@ -1,4 +1,5 @@
 import { Component, inject, ChangeDetectionStrategy, signal, computed, effect } from '@angular/core';
+import { getCategoryColor } from '../../models/category-colors';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { IpcService } from '../../services/ipc.service';
 import { ClockService } from '../../services/clock.service';
@@ -21,6 +22,17 @@ export class DayViewComponent  {
   // Derived / mirrored signals from service
   entries = computed(() => this.ipc.dayEntries());
   days = computed(() => this.ipc.days());
+
+  // For colorizing categories consistently
+  categoryList = computed(() => {
+    // Get all unique categories for the day, in order of appearance
+    const cats = this.entries().map(e => e.category);
+    return Array.from(new Set(cats));
+  });
+
+  getCategoryColor(cat: string): string {
+    return getCategoryColor(cat, this.categoryList());
+  }
 
   private weekdayNames = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
   formattedDay = computed(() => {
