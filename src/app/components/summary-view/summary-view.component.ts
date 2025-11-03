@@ -1,4 +1,5 @@
 import { Component, inject, ChangeDetectionStrategy, signal, computed, effect } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { IpcService, SummaryRow } from '../../services/ipc.service';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -8,7 +9,8 @@ import { CATEGORY_GROUPS } from '../../models/categories';
   selector: 'summary-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './summary-view.component.html',
-  styleUrls: ['./summary-view.component.scss']
+  styleUrls: ['./summary-view.component.scss'],
+  imports: [DecimalPipe]
 })
 export class SummaryViewComponent  {
   private route = inject(ActivatedRoute);
@@ -67,6 +69,34 @@ export class SummaryViewComponent  {
       g.children.sort((a,b)=> b.minutes - a.minutes || a.category.localeCompare(b.category));
     }
     return Array.from(groups.values()).sort((a,b)=> b.minutes - a.minutes || a.label.localeCompare(b.label));
+  });
+
+  // Palette for charts (high contrast, works light/dark). Fallback cycles if more categories.
+  private palette = ['#6366F1','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#0EA5E9','#84CC16','#D946EF','#F43F5E'];
+
+  // Flattened category totals with color + percentages for charts
+  categoryChartData = computed(() => {
+    const total = this.totalMinutes();
+    const data = this.categoryTotals();
+    return data.map((d,i) => {
+      const pct = total > 0 ? (d.minutes / total) * 100 : 0;
+      return { ...d, percent: pct, color: this.palette[i % this.palette.length] };
+    });
+  });
+
+  // Donut chart segments: cumulative offsets for stroke-dasharray
+  circumference = 2 * Math.PI * 54; // for donut chart
+  donutSegments = computed(() => {
+    const radius = 54; // matches viewBox planned
+    const circumference = this.circumference;
+    let acc = 0;
+    const total = this.totalMinutes();
+    return this.categoryChartData().map(seg => {
+      const len = total > 0 ? (seg.minutes / total) * circumference : 0;
+      const s = { ...seg, length: len, offset: acc };
+      acc += len;
+      return s;
+    });
   });
 
   private lastRequest = 0;

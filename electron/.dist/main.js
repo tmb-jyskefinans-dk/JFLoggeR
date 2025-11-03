@@ -104,9 +104,8 @@ function scheduleTicker() {
         if ((0, time_1.isWorkTime)(boundary)) {
             const gran = (0, time_1.getSlotMinutes)();
             const currentStart = (0, time_1.currentSlotStart)(boundary);
-            const prevStart = new Date(currentStart.getTime() - gran * 60000);
             try {
-                console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, currentStart: (0, time_1.slotKey)(currentStart), prevStart: (0, time_1.slotKey)(prevStart) });
+                console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, currentStart: (0, time_1.slotKey)(currentStart) });
             }
             catch { }
             const sDyn = (0, db_1.getSettings)();
@@ -116,14 +115,15 @@ function scheduleTicker() {
             dayStart.setHours(dsh, dsm, 0, 0);
             const dayEnd = new Date(boundary);
             dayEnd.setHours(deh, dem, 0, 0);
-            if (prevStart >= dayStart && prevStart < dayEnd) {
-                const key = (0, time_1.slotKey)(prevStart);
+            // At slot boundary we now prompt for the CURRENT slot (start just begun) instead of the one that finished.
+            if (currentStart >= dayStart && currentStart < dayEnd) {
+                const key = (0, time_1.slotKey)(currentStart);
                 pending.add(key);
                 try {
-                    console.log('[main] enqueue prevStart', key, 'pending size', pending.size);
+                    console.log('[main] enqueue currentStart', key, 'pending size', pending.size);
                 }
                 catch { }
-                notifyForSlot(prevStart);
+                notifyForSlot(currentStart);
                 if (sDyn.auto_focus_on_slot && win) {
                     try {
                         if (win.isMinimized())
@@ -147,7 +147,7 @@ function scheduleTicker() {
                         catch { } }, 350);
                     }
                     catch { }
-                    console.log('[main] auto-focus tick -> prompt:open', key);
+                    console.log('[main] auto-focus tick -> prompt:open (current slot)', key);
                     win?.webContents.send('prompt:open', { slot: key });
                 }
             }
@@ -226,13 +226,12 @@ electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
     const wasEnabled = (before.weekdays_mask & (1 << now.getDay())) !== 0;
     const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
     if (!wasEnabled && isEnabled && (0, time_1.isWorkTime)(now)) {
-        // Emit catch-up for the previous slot
-        const gran = (0, time_1.getSlotMinutes)();
-        const prevStart = new Date((0, time_1.currentSlotStart)(now).getTime() - gran * 60000);
-        const key = (0, time_1.slotKey)(prevStart);
+        // Emit catch-up for the current slot (we switched to logging at start of interval)
+        const currentStart = (0, time_1.currentSlotStart)(now);
+        const key = (0, time_1.slotKey)(currentStart);
         if (!pending.has(key)) {
             pending.add(key);
-            notifyForSlot(prevStart);
+            notifyForSlot(currentStart);
             win?.webContents.send('prompt:open', { slot: key });
             win?.webContents.send('queue:updated');
         }

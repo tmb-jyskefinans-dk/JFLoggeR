@@ -33,6 +33,51 @@
           </div>
         </div>
       }
+      @if(categoryChartData().length) {
+        <div class="mb-8">
+          <h3 class="text-sm font-semibold tracking-tight text-slate-600 dark:text-slate-300 mb-3">Kategori fordeling (minutter)</h3>
+          <!-- Horizontal bar chart -->
+          <div class="space-y-2" role="group" aria-label="Horisontal søjlediagram over minutter pr. kategori">
+            @for(c of categoryChartData(); track c.category) {
+              <div class="flex items-center gap-2">
+                <div class="w-32 truncate text-[11px] font-medium" [style.color]="c.color">{{c.category || 'Ingen'}}</div>
+                <div class="flex-1 h-3 rounded bg-slate-200 dark:bg-slate-700 overflow-hidden" aria-hidden="true">
+                  <div class="h-full" [style.background]="c.color" [style.width.%]="c.percent" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)"></div>
+                </div>
+                <div class="w-20 text-right text-[11px] text-slate-600 dark:text-slate-300">{{c.minutes}} min</div>
+              </div>
+            }
+          </div>
+          <!-- Donut chart -->
+          <div class="mt-6 flex flex-col lg:flex-row gap-6">
+            <figure class="flex flex-col items-center gap-2" aria-label="Donutdiagram kategori minutter">
+              <svg viewBox="0 0 140 140" width="180" height="180" role="img" aria-labelledby="donutTitle donutDesc">
+                <title id="donutTitle">Kategori minutter</title>
+                <desc id="donutDesc">Fordeling af loggede minutter per kategori for valgt dag</desc>
+                <circle cx="70" cy="70" r="54" fill="none" stroke="var(--tw-color-slate-300,var(--tw-prose-body))" stroke-width="18" opacity="0.25"></circle>
+                @for(seg of donutSegments(); track seg.category) {
+      <circle cx="70" cy="70" r="54" fill="none" [attr.stroke]="seg.color" stroke-width="18" stroke-linecap="butt"
+        [attr.stroke-dasharray]="seg.length + ' ' + (circumference - seg.length)"
+                          [attr.stroke-dashoffset]="-seg.offset" opacity="0.95">
+                    <title>{{seg.category || 'Ingen'}}: {{seg.minutes}} min ({{seg.percent|number:'1.0-1'}}%)</title>
+                  </circle>
+                }
+              </svg>
+              <figcaption class="text-xs text-slate-500 dark:text-slate-400">Total: {{totalMinutes()}} min</figcaption>
+            </figure>
+            <ul class="grid xs:grid-cols-2 gap-2 flex-1" aria-label="Kategori farve forklaring">
+              @for(c of categoryChartData(); track c.category) {
+                <li class="flex items-center gap-2 text-[11px]">
+                  <span class="w-3 h-3 rounded-sm" [style.background]="c.color"></span>
+                  <span class="flex-1 truncate">{{c.category || 'Ingen kategori'}}</span>
+                  <span class="font-medium">{{c.minutes}} min</span>
+                  <span class="text-slate-500 dark:text-slate-400">({{c.percent|number:'1.0-1'}}%)</span>
+                </li>
+              }
+            </ul>
+          </div>
+        </div>
+      }
     <table class="min-w-full text-sm" aria-describedby="summaryTotals" aria-label="Work slot summary table">
   <caption class="text-left text-sm text-slate-500 dark:text-slate-400 mb-2">Samlet oversigt over arbejdsslots for {{day()}}</caption>
       <thead class="text-slate-600 dark:text-slate-300">
