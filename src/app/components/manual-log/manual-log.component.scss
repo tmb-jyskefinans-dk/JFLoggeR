@@ -1,2 +1,15 @@
+.andet-alert {
+	margin-top: 0.5rem;
+			font-size: 0.89em;
+			line-height: 1.2;
+	color: #155fa0;
+	background: #e8f1fa;
+	border: 1px solid #b6d4ef;
+	border-radius: 0.375rem;
+	padding: 0.75em 1em;
+	display: flex;
+	align-items: center;
+	gap: 0.7em;
+}
 /* Manual log component styles placeholder */
 :host { display:block; }

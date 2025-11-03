@@ -40,10 +40,5 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
       'Estimering'
     ]
   },
-  {
-    label: 'Andet',
-    items: [
-      'Andet',
-    ]
-  }
+
 ];
