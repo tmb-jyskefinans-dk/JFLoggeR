@@ -6,6 +6,15 @@ const electron_1 = require("electron");
 const node_path_1 = tslib_1.__importDefault(require("node:path"));
 const db_1 = require("./db");
 const time_1 = require("./time");
+// Handle Squirrel.Windows install/update events early so shortcuts get created.
+// electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
+try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    if (require('electron-squirrel-startup')) {
+        electron_1.app.quit();
+    }
+}
+catch { /* ignore if module missing in dev */ }
 let win = null;
 const pending = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 let tickerHandle = null; // current scheduled tick timeout
@@ -24,7 +33,8 @@ function createWindow() {
             nodeIntegration: false
         }
     });
-    electron_1.app.setAppUserModelId('com.jyskefinans.worklogger');
+    // Update to new branded AppUserModelID (must match package.json build.appId for notifications & taskbar grouping)
+    electron_1.app.setAppUserModelId('com.jyskefinans.jfloggr');
     const devUrl = process.env['VITE_DEV_SERVER_URL'];
     if (devUrl) {
         win.loadURL(devUrl);

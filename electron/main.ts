@@ -27,6 +27,15 @@ import {
   parseHM
 } from './time';
 
+// Handle Squirrel.Windows install/update events early so shortcuts get created.
+// electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  if (require('electron-squirrel-startup')) {
+    app.quit();
+  }
+} catch { /* ignore if module missing in dev */ }
+
 let win: BrowserWindow | null = null;
 const pending: Set<string> = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 let tickerHandle: NodeJS.Timeout | null = null; // current scheduled tick timeout
@@ -47,7 +56,8 @@ function createWindow() {
     }
   });
 
-  app.setAppUserModelId('com.jyskefinans.worklogger');
+  // Update to new branded AppUserModelID (must match package.json build.appId for notifications & taskbar grouping)
+  app.setAppUserModelId('com.jyskefinans.jfloggr');
 
   const devUrl = process.env['VITE_DEV_SERVER_URL'];
   if (devUrl) {
@@ -97,24 +107,24 @@ function scheduleTicker() {
     if (isWorkTime(boundary)) {
       const gran = getSlotMinutes();
       const currentStart = currentSlotStart(boundary);
-      const prevStart = new Date(currentStart.getTime() - gran * 60000);
-      try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, currentStart: slotKey(currentStart), prevStart: slotKey(prevStart) }); } catch {}
+      try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, currentStart: slotKey(currentStart) }); } catch {}
       const sDyn = getSettings();
       const { h: dsh, m: dsm } = parseHM(sDyn.work_start);
       const { h: deh, m: dem } = parseHM(sDyn.work_end);
       const dayStart = new Date(boundary); dayStart.setHours(dsh, dsm, 0, 0);
       const dayEnd = new Date(boundary); dayEnd.setHours(deh, dem, 0, 0);
-      if (prevStart >= dayStart && prevStart < dayEnd) {
-        const key = slotKey(prevStart);
+      // At slot boundary we now prompt for the CURRENT slot (start just begun) instead of the one that finished.
+      if (currentStart >= dayStart && currentStart < dayEnd) {
+        const key = slotKey(currentStart);
         pending.add(key);
-        try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch {}
-        notifyForSlot(prevStart);
+        try { console.log('[main] enqueue currentStart', key, 'pending size', pending.size); } catch {}
+        notifyForSlot(currentStart);
         if (sDyn.auto_focus_on_slot && win) {
           try { if (win.isMinimized()) win.restore(); } catch {}
           try { win.show(); } catch {}
           try { win.focus(); } catch {}
           try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 350); } catch {}
-          console.log('[main] auto-focus tick -> prompt:open', key);
+          console.log('[main] auto-focus tick -> prompt:open (current slot)', key);
           win?.webContents.send('prompt:open', { slot: key });
         }
       }
@@ -195,13 +205,12 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   const wasEnabled = (before.weekdays_mask & (1 << now.getDay())) !== 0;
   const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
   if (!wasEnabled && isEnabled && isWorkTime(now)) {
-    // Emit catch-up for the previous slot
-    const gran = getSlotMinutes();
-    const prevStart = new Date(currentSlotStart(now).getTime() - gran * 60000);
-    const key = slotKey(prevStart);
+    // Emit catch-up for the current slot (we switched to logging at start of interval)
+    const currentStart = currentSlotStart(now);
+    const key = slotKey(currentStart);
     if (!pending.has(key)) {
       pending.add(key);
-      notifyForSlot(prevStart);
+      notifyForSlot(currentStart);
       win?.webContents.send('prompt:open', { slot: key });
       win?.webContents.send('queue:updated');
     }

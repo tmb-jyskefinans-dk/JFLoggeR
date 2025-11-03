@@ -44,7 +44,17 @@ export class IpcService {
 
   constructor() {
     window.workApi.onPrompt((d) => {
-      if (d && typeof d.slot === 'string') this.lastPromptSlot.set(d.slot);
+      if (d && typeof d.slot === 'string') {
+        // Set prompt slot immediately
+        this.lastPromptSlot.set(d.slot);
+        // Optimistically ensure the pendingSlots signal contains the slot so
+        // a freshly opened dialog can pre-select it without racing the async load.
+        const current = this.pendingSlots();
+        if (!current.includes(d.slot)) {
+          this.pendingSlots.set([...current, d.slot].sort());
+        }
+      }
+      // Load authoritative list from main process (reconciles optimistic add)
       this.loadPending();
     });
     window.workApi.onFocus(() => this.loadPending());
