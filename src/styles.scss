@@ -1,4 +1,4 @@
-@use "tailwindcss";
+/* Tailwind directives moved to separate plain CSS file (tailwind.css) to avoid SCSS preprocessor issues. */
 
 /* Global styles (Tailwind utilities only; component-level @apply disabled due to build pipeline limits) */
 
@@ -12,5 +12,10 @@ input svg, .input svg, .form-field svg, .input-icon svg, .input-icon i, .input-i
 /* Provide size helpers if developer adds class 'icon-sm' or 'icon-md' */
 .icon-sm { width: 0.875rem; height: 0.875rem; }
 .icon-md { width: 1rem; height: 1rem; }
+
+/* Smooth theme transitions (applied transiently via ThemeService) */
+html.theme-transition, html.theme-transition * {
+	transition: background-color .25s ease, color .25s ease, border-color .25s ease, fill .25s ease, stroke .25s ease;
+}
 
 

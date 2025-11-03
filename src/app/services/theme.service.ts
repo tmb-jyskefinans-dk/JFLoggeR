@@ -1,44 +1,42 @@
 import { signal, effect, Injectable } from '@angular/core';
 
-// ThemeService centralizes theme mode handling (system | light | dark)
-// Applies 'dark' class to <html> and persists user choice in localStorage.
+// Simplified ThemeService: app controls theme explicitly (light | dark) independent of OS.
+// Persists selection in localStorage and applies 'dark' class to <html>.
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
-  readonly mode = signal<'system'|'light'|'dark'>(this.initMode());
-  readonly systemPrefDark = signal<boolean>(matchMedia('(prefers-color-scheme: dark)').matches);
-  readonly effective = signal<'light'|'dark'>(this.initialEffective());
+  readonly mode = signal<'light'|'dark'>(this.initMode());
 
-  private initMode(): 'system'|'light'|'dark' {
+  private initMode(): 'light'|'dark' {
     const stored = localStorage.getItem('themeMode');
-    return stored === 'light' || stored === 'dark' ? stored : 'system';
-  }
-
-  private initialEffective(): 'light'|'dark' {
-    const m = this.mode();
-    const sysDark = this.systemPrefDark();
-    return m === 'system' ? (sysDark ? 'dark' : 'light') : (m === 'dark' ? 'dark' : 'light');
+    // Default to dark when no stored preference; preserve explicit light if chosen previously.
+    return stored === 'light' ? 'light' : 'dark';
   }
 
   constructor() {
-    const mq = matchMedia('(prefers-color-scheme: dark)');
-    mq.addEventListener('change', e => this.systemPrefDark.set(e.matches));
-
     effect(() => {
-      const mode = this.mode();
-      const sys = this.systemPrefDark();
-      const isDark = mode === 'system' ? sys : (mode === 'dark');
-      this.effective.set(isDark ? 'dark' : 'light');
+      const m = this.mode();
+      const isDark = m === 'dark';
       document.documentElement.classList.toggle('dark', isDark);
-      // Force UA native widgets / scrollbars into correct scheme (prevents OS dark overriding light choice)
-      document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-      localStorage.setItem('themeMode', mode);
+  // Force color-scheme to follow explicit mode so OS dark preference doesn't keep dark form controls in light mode.
+  document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+      localStorage.setItem('themeMode', m);
     });
   }
 
-  setMode(m: 'system'|'light'|'dark') { this.mode.set(m); }
-  cycle() {
-    const order: ('system'|'light'|'dark')[] = ['system','light','dark'];
-    const idx = order.indexOf(this.mode());
-    this.mode.set(order[(idx+1)%order.length]);
+  private triggerTransition() {
+    // Add a transient class to enable CSS transitions.
+    document.documentElement.classList.add('theme-transition');
+    // Remove after animation duration (~250ms)
+    setTimeout(() => document.documentElement.classList.remove('theme-transition'), 300);
+  }
+
+  setMode(m: 'light'|'dark') {
+    if (this.mode() === m) return;
+    this.triggerTransition();
+    this.mode.set(m);
+  }
+  toggle() {
+    this.triggerTransition();
+    this.mode.set(this.mode() === 'dark' ? 'light' : 'dark');
   }
 }

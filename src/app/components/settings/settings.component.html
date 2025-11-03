@@ -71,21 +71,21 @@
 
       <div class="md:col-span-3 flex flex-col gap-2">
         <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Tema</label>
-        <div class="flex flex-wrap gap-4 text-sm">
-          <label class="inline-flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="theme_mode" [checked]="theme.mode()==='system'" (change)="theme.setMode('system')" class="h-4 w-4 border-slate-300 dark:border-slate-600">
-            System
-          </label>
-          <label class="inline-flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="theme_mode" [checked]="theme.mode()==='light'" (change)="theme.setMode('light')" class="h-4 w-4 border-slate-300 dark:border-slate-600">
+        <div class="flex items-center gap-3" role="group" aria-label="Tema valg">
+          <button type="button" (click)="theme.setMode('light')"
+            aria-label="Skift til lyst tema" [attr.aria-pressed]="theme.mode()==='light'"
+            class="inline-flex items-center rounded-md px-3 h-8 text-xs font-medium border transition"
+            [class]="theme.mode()==='light' ? 'border-amber-500 bg-amber-500 text-white shadow' : 'border-slate-300 bg-white text-slate-600 hover:border-amber-400 hover:text-amber-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
             Lys
-          </label>
-          <label class="inline-flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="theme_mode" [checked]="theme.mode()==='dark'" (change)="theme.setMode('dark')" class="h-4 w-4 border-slate-300 dark:border-slate-600">
+          </button>
+          <button type="button" (click)="theme.setMode('dark')"
+            aria-label="Skift til mørkt tema" [attr.aria-pressed]="theme.mode()==='dark'"
+            class="inline-flex items-center rounded-md px-3 h-8 text-xs font-medium border transition"
+            [class]="theme.mode()==='dark' ? 'border-indigo-600 bg-indigo-600 text-white shadow' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-500 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
             Mørk
-          </label>
+          </button>
         </div>
-        <p class="text-xs text-slate-500 dark:text-slate-400">Valg af Lys/Mørk ignorerer systemets præference. System følger Windows macOS farveskema automatisk.</p>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Standard er mørkt tema. App styrer nu tema fuldstændigt – systemets indstilling ignoreres.</p>
       </div>
 
       <div class="md:col-span-3 mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
