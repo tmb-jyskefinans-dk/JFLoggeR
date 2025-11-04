@@ -20,6 +20,7 @@ export class ManualLogComponent {
   category = '';
   andetDescription = '';
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
+  recent = this.ipc.recent; // recent reusable descriptions/categories
   unmatchedCategory(): boolean {
     const c = this.category?.trim();
     if (!c) return false;
@@ -53,5 +54,12 @@ export class ManualLogComponent {
     // Refresh signals for the affected day so Today/Day/Summary views update instantly
     this.ipc.loadDay(this.date);
   this.description=''; this.category=''; this.andetDescription='';
+  }
+
+  applyPreset(v: string) {
+    if (!v) return;
+    const [desc, cat] = v.split('||');
+    if (desc) this.description = desc;
+    if (cat) this.category = cat;
   }
 }

@@ -27,3 +27,16 @@
 .icon-info {
 	font-size: 1.1em;
 }
+
+/* Improved contrast for 'Andet' description input */
+.andet-input {
+	color: #0f172a; /* slate-900 */
+	font-weight: 500;
+}
+:host-context(.dark) .andet-input {
+	color: #0f172a; /* keep dark text on pale yellow bg in dark mode */
+}
+.andet-input::placeholder {
+	color: #475569; /* slate-600 */
+	opacity: 0.85;
+}

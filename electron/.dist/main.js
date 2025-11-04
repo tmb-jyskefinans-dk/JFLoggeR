@@ -182,8 +182,10 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
         return;
     }
     for (const slot of slots) {
-        if (!includeFuture && slot.getTime() >= now.getTime())
-            break; // stop at first future slot
+        // Only add to pending if the slot's END time is in the past
+        const slotEnd = new Date(slot.getTime() + (0, time_1.getSlotMinutes)() * 60000);
+        if (!includeFuture && slotEnd.getTime() > now.getTime())
+            break; // stop at first slot that hasn't ended
         const key = (0, time_1.slotKey)(slot);
         if (!done.has(key))
             pending.add(key);
@@ -202,11 +204,13 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
         return;
     }
     for (const slot of slots) {
+        // Only add to pending if the slot's END time is in the past
+        const slotEnd = new Date(slot.getTime() + (0, time_1.getSlotMinutes)() * 60000);
         const key = (0, time_1.slotKey)(slot);
         if (existing.has(key))
             continue; // already logged
-        if (!includeFuture && slot.getTime() >= now.getTime())
-            break; // stop adding at first future slot
+        if (!includeFuture && slotEnd.getTime() > now.getTime())
+            break; // stop at first slot that hasn't ended
         if (!doneOrLogged(key))
             pending.add(key);
     }

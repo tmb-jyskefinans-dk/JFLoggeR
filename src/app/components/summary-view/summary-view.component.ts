@@ -31,6 +31,7 @@ export class SummaryViewComponent  {
   totalSlots = computed(() => this.rows().reduce((a, r) => a + r.slots, 0));
   totalMinutes = computed(() => this.rows().reduce((a, r) => a + r.minutes, 0));
   // Grouped totals by category
+  // Category totals aggregated, but ordered by CATEGORY_GROUPS definition rather than by minutes
   categoryTotals = computed(() => {
     const acc = new Map<string, { category: string; slots: number; minutes: number }>();
     for (const r of this.rows()) {
@@ -42,8 +43,21 @@ export class SummaryViewComponent  {
         acc.set(r.category, { category: r.category, slots: r.slots, minutes: r.minutes });
       }
     }
-    return Array.from(acc.values())
-      .sort((a,b)=> b.minutes - a.minutes || a.category.localeCompare(b.category));
+    // Build ordered list: iterate group items in declared order, include only present
+    const ordered: { category: string; slots: number; minutes: number }[] = [];
+    for (const group of CATEGORY_GROUPS) {
+      for (const cat of group.items) {
+        const entry = acc.get(cat);
+        if (entry) ordered.push(entry);
+      }
+    }
+    // Append any categories not in CATEGORY_GROUPS (e.g. 'Andet') in stable name order
+    const extras: { category: string; slots: number; minutes: number }[] = [];
+    for (const [k,v] of acc.entries()) {
+      if (!CATEGORY_GROUPS.some(g => g.items.includes(k))) extras.push(v);
+    }
+    extras.sort((a,b) => a.category.localeCompare(b.category));
+    return [...ordered, ...extras];
   });
 
   // Root group hierarchy: map each category to its parent label from CATEGORY_GROUPS
