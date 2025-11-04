@@ -1,2 +1,40 @@
-/* Summary view styles placeholder */
+/* Summary view styles */
 :host { display:block; }
+
+/* Bar fill animation and hover */
+.bar-fill {
+	transition: width 0.9s cubic-bezier(.25,.8,.25,1), filter .3s ease, transform .3s ease;
+	will-change: width, transform;
+}
+.bar-fill:hover,
+.bar-fill:focus-visible {
+	filter: brightness(1.15);
+	transform: scaleY(1.35);
+	outline: none;
+}
+
+/* Donut segment animation */
+.donut-seg {
+	transition: stroke-dasharray 1.2s cubic-bezier(.25,.8,.25,1), stroke-dashoffset .8s ease-out, filter .3s ease, stroke-width .3s ease;
+}
+.donut-seg:hover,
+.donut-seg:focus-visible {
+	filter: brightness(1.15);
+	stroke-width: 22;
+	outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.bar-fill,
+	.donut-seg {
+		transition: none !important;
+		transform: none !important;
+	}
+	.donut-seg:hover,
+	.donut-seg:focus-visible,
+	.bar-fill:hover,
+	.bar-fill:focus-visible {
+		filter: none;
+		stroke-width: 18;
+	}
+}

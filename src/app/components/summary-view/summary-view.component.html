@@ -38,8 +38,8 @@
               <circle cx="70" cy="70" r="54" fill="none" stroke="var(--tw-color-slate-300,var(--tw-prose-body))" stroke-width="18" opacity="0.25"></circle>
               @for(seg of donutSegments(); track seg.category) {
                 <circle cx="70" cy="70" r="54" fill="none" [attr.stroke]="seg.color" stroke-width="18" stroke-linecap="butt"
-                  [attr.stroke-dasharray]="seg.length + ' ' + (circumference - seg.length)"
-                  [attr.stroke-dashoffset]="-seg.offset" opacity="0.95"
+                  [attr.stroke-dasharray]="(animateDonut() ? (seg.length + ' ' + (circumference - seg.length)) : ('0 ' + circumference))"
+                  [attr.stroke-dashoffset]="-seg.offset" opacity="0.95" class="donut-seg"
                   tabindex="0"
                   [attr.aria-label]="(seg.category || 'Ingen kategori') + ': ' + seg.minutes + ' min (' + (seg.percent|number:'1.0-1') + '%)'">
                   <title>{{seg.category || 'Ingen kategori'}}: {{seg.minutes}} min ({{seg.percent|number:'1.0-1'}}%)</title>
@@ -60,7 +60,7 @@
          [attr.title]="c.category || 'Ingen kategori'"
          [attr.aria-label]="c.category || 'Ingen kategori'">{{c.category || 'Ingen'}}</div>
                 <div class="flex-1 h-3 rounded bg-slate-200 dark:bg-slate-700 overflow-hidden" aria-hidden="true">
-                  <div class="h-full" [style.background]="c.color" [style.width.%]="c.percent" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)"></div>
+                  <div class="h-full bar-fill" [style.background]="c.color" [style.width.%]="animateBars() ? c.percent : 0" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)" tabindex="0" [attr.aria-label]="c.category + ' bar: ' + c.minutes + ' minutter (' + (c.percent|number:'1.0-1') + '%)'"></div>
                 </div>
        <div class="w-32 text-right text-[11px] text-slate-600 dark:text-slate-300"
          [attr.title]="(c.minutes + ' min (' + (c.percent|number:'1.0-1') + '%)')"
@@ -92,7 +92,7 @@
                       </div>
                       <div class="text-[10px] text-slate-500 dark:text-slate-400">{{child.slots}} intervaller</div>
                       <div class="h-1 rounded bg-slate-200 dark:bg-slate-600 overflow-hidden" aria-hidden="true">
-                        <div class="h-full bg-indigo-500 dark:bg-indigo-400" [style.width.%]="(child.minutes/totalMinutes())*100"></div>
+                        <div class="h-full bar-fill" [style.background]="getColor(child.category)" [style.width.%]="animateBars() ? ((child.minutes/totalMinutes())*100) : 0" tabindex="0" [attr.aria-label]="child.category + ' bar: ' + child.minutes + ' minutter'" title="{{child.minutes}} min"></div>
                       </div>
                     </li>
                   }

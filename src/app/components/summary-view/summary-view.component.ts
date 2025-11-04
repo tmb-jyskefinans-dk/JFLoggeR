@@ -1,9 +1,10 @@
-import { Component, inject, ChangeDetectionStrategy, signal, computed, effect } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, AfterViewInit } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { IpcService, SummaryRow } from '../../services/ipc.service';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CATEGORY_GROUPS } from '../../models/categories';
+import { getCategoryColor } from '../../models/category-colors';
 import { ExportService } from '../../services/export.service';
 
 @Component({
@@ -16,7 +17,7 @@ import { ExportService } from '../../services/export.service';
     '(window:keydown)': 'onKeydown($event)'
   }
 })
-export class SummaryViewComponent  {
+export class SummaryViewComponent implements AfterViewInit  {
   private route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   exporter = inject(ExportService);
@@ -91,8 +92,10 @@ export class SummaryViewComponent  {
     return Array.from(groups.values()).sort((a,b)=> b.minutes - a.minutes || a.label.localeCompare(b.label));
   });
 
-  // Palette for charts (high contrast, works light/dark). Fallback cycles if more categories.
-  private palette = ['#6366F1','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#0EA5E9','#84CC16','#D946EF','#F43F5E'];
+  // Animation triggers
+  private animResetToken = 0;
+  animateBars = signal(false);
+  animateDonut = signal(false);
 
   // Flattened category totals with color + percentages for charts
   categoryChartData = computed(() => {
@@ -100,7 +103,8 @@ export class SummaryViewComponent  {
     const data = this.categoryTotals();
     return data.map((d,i) => {
       const pct = total > 0 ? (d.minutes / total) * 100 : 0;
-      return { ...d, percent: pct, color: this.palette[i % this.palette.length] };
+      // Stable color derived from category string
+      return { ...d, percent: pct, color: getCategoryColor(d.category) };
     });
   });
 
@@ -188,8 +192,11 @@ export class SummaryViewComponent  {
       // Day change toast (skip first initialization)
       if (this.initialized) {
         this.showToast(`Dag ændret til ${d}`);
+        this.resetAnimations();
       } else {
         this.initialized = true;
+        // initial animation start after first data load
+        this.resetAnimations();
       }
     });
   }
@@ -210,4 +217,27 @@ export class SummaryViewComponent  {
       this.toast.set(null);
     }, 3000);
   }
+
+  ngAfterViewInit() {
+    // Kick off animations once view is ready
+    this.startAnimations();
+  }
+
+  private resetAnimations() {
+    this.animResetToken++;
+    this.animateBars.set(false);
+    this.animateDonut.set(false);
+    // Schedule start after microtask to allow DOM bindings update
+    setTimeout(() => this.startAnimations(), 50);
+  }
+
+  private startAnimations() {
+    // Avoid starting twice if already active
+    if (!this.animateBars() || !this.animateDonut()) {
+      this.animateBars.set(true);
+      this.animateDonut.set(true);
+    }
+  }
+
+  getColor(cat: string) { return getCategoryColor(cat); }
 }
