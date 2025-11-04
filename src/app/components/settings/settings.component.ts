@@ -22,6 +22,9 @@ export class SettingsComponent {
   weekdayState = signal<boolean[]>([false, true, true, true, true, true, false]);
   autoFocusOnSlot = signal<boolean>(false);
   notificationSilent = signal<boolean>(true);
+  staleThresholdMinutes = signal<number>(45);
+  autoStartOnLogin = signal<boolean>(false);
+  groupNotifications = signal<boolean>(true);
 
   days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   initialSettings = signal<any|null>(null);
@@ -47,7 +50,10 @@ export class SettingsComponent {
            s.slot_minutes !== this.slotMinutes() ||
            maskOrig !== maskNow ||
            (!!s.auto_focus_on_slot !== this.autoFocusOnSlot()) ||
-           (!!s.notification_silent !== this.notificationSilent());
+           (!!s.notification_silent !== this.notificationSilent()) ||
+           (Number(s.stale_threshold_minutes) !== this.staleThresholdMinutes()) ||
+           (!!s.auto_start_on_login !== this.autoStartOnLogin()) ||
+           (!!s.group_notifications !== this.groupNotifications());
   });
 
   constructor() {
@@ -67,6 +73,9 @@ export class SettingsComponent {
     this.weekdayState.set(Array.from({length:7},(_,i)=> (s.weekdays_mask & (1<<i))!==0));
     this.autoFocusOnSlot.set(!!s.auto_focus_on_slot);
     this.notificationSilent.set(!!s.notification_silent);
+    this.staleThresholdMinutes.set(Number(s.stale_threshold_minutes) || 45);
+    this.autoStartOnLogin.set(!!s.auto_start_on_login);
+    this.groupNotifications.set(!!s.group_notifications);
   }
 
   save() {
@@ -77,7 +86,10 @@ export class SettingsComponent {
       slot_minutes: Number(this.slotMinutes()),
       weekdays_mask,
       auto_focus_on_slot: this.autoFocusOnSlot(),
-      notification_silent: this.notificationSilent()
+      notification_silent: this.notificationSilent(),
+      stale_threshold_minutes: Number(this.staleThresholdMinutes()),
+      auto_start_on_login: this.autoStartOnLogin(),
+      group_notifications: this.groupNotifications()
     };
     this.ipc.saveSettings(payload);
     // Update baseline after save for change detection

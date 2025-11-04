@@ -22,6 +22,10 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     onAppReady: (cb) => electron_1.ipcRenderer.once('app:ready', cb),
     // Queue update event (pending slots rebuilt)
     onQueueUpdated: (cb) => electron_1.ipcRenderer.on('queue:updated', cb),
+    // Navigation events
+    onNavigateToday: (cb) => electron_1.ipcRenderer.on('navigate:today', (_e, d) => cb(d.day)),
+    onDialogOpenLog: (cb) => electron_1.ipcRenderer.on('dialog:open-log', (_e, d) => cb(d?.slot)),
+    onDialogOpenLogAll: (cb) => electron_1.ipcRenderer.on('dialog:open-log-all', () => cb()),
     // Debug notification trigger
     sendTestNotification: (body) => electron_1.ipcRenderer.invoke('debug:notify', { body }),
     // Window controls

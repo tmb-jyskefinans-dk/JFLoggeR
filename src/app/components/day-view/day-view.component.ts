@@ -1,5 +1,6 @@
 import { Component, inject, ChangeDetectionStrategy, signal, computed, effect } from '@angular/core';
 import { getCategoryColor } from '../../models/category-colors';
+import { CATEGORY_GROUPS } from '../../models/categories';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { IpcService } from '../../services/ipc.service';
 import { ClockService } from '../../services/clock.service';
@@ -23,16 +24,24 @@ export class DayViewComponent  {
   entries = computed(() => this.ipc.dayEntries());
   days = computed(() => this.ipc.days());
 
-  // For colorizing categories consistently
-  categoryList = computed(() => {
-    // Get all unique categories for the day, in order of appearance
-    const cats = this.entries().map(e => e.category);
-    return Array.from(new Set(cats));
+  // Ordered categories using same logic as summary (group declaration order then extras)
+  orderedCategories = computed(() => {
+    const present = new Set(this.entries().map(e => e.category));
+    const ordered: string[] = [];
+    for (const grp of CATEGORY_GROUPS) {
+      for (const cat of grp.items) if (present.has(cat)) ordered.push(cat);
+    }
+    // extras (e.g. 'Andet' or unmatched) appended alphabetically
+    const extras: string[] = [];
+    for (const cat of present) {
+      if (!ordered.includes(cat)) extras.push(cat);
+    }
+    extras.sort((a,b)=> a.localeCompare(b));
+    return [...ordered, ...extras];
   });
 
-  getCategoryColor(cat: string): string {
-    return getCategoryColor(cat, this.categoryList());
-  }
+  // Use hashing-based getCategoryColor like summary (no position indexing) for full consistency
+  getColor(cat: string): string { return getCategoryColor(cat); }
 
   private weekdayNames = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
   formattedDay = computed(() => {

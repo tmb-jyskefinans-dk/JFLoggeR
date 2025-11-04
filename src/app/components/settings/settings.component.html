@@ -69,6 +69,33 @@
         </label>
       </div>
 
+      <div class="md:col-span-3 flex flex-col gap-2 mt-2">
+        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Stale interval tærskel (minutter)</label>
+  <input type="number" min="1" [ngModel]="staleThresholdMinutes()" (ngModelChange)="staleThresholdMinutes.set($event ? +$event : staleThresholdMinutes())" name="stale_threshold_minutes"
+          class="w-40 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" aria-describedby="stale-help" />
+  <p id="stale-help" class="text-xs text-slate-500 dark:text-slate-400">Når et ulogget interval overstiger denne grænse, vises en påmindelse om at registrere tiden.</p>
+      </div>
+
+      <div class="md:col-span-3 flex items-start gap-3">
+        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="autoStartOnLogin()" (ngModelChange)="autoStartOnLogin.set($event)" name="auto_start_on_login" aria-describedby="auto-start-help">
+          <span class="leading-tight">
+            Start automatisk ved login
+            <span id="auto-start-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for at starte appen når du logger ind på systemet.</span>
+          </span>
+        </label>
+      </div>
+
+      <div class="md:col-span-3 flex items-start gap-3">
+        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="groupNotifications()" (ngModelChange)="groupNotifications.set($event)" name="group_notifications" aria-describedby="group-notif-help">
+          <span class="leading-tight">
+            Gruppér notifikationer når væk
+            <span id="group-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Akkumuler flere intervaller til én opsummering hvis du er væk fra computeren.</span>
+          </span>
+        </label>
+      </div>
+
       <div class="md:col-span-3 flex flex-col gap-2">
         <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Tema</label>
         <div class="flex items-center gap-3" role="group" aria-label="Tema valg">

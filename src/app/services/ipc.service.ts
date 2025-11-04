@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, inject } from '@angular/core';
+import { Router } from '@angular/router';
 
 declare global {
   interface Window {
@@ -40,9 +41,12 @@ export class IpcService {
   settings = signal<any|null>(null);
   lastPromptSlot = signal<string|null>(null);
   windowMaximized = signal<boolean>(false);
+  // Flag to indicate next opened log dialog should preselect all pending slots
+  bulkSelectAllFlag = signal(false);
 
 
   constructor() {
+    const router = inject(Router);
     window.workApi.onPrompt((d) => {
       if (d && typeof d.slot === 'string') {
         // Set prompt slot immediately
@@ -70,6 +74,16 @@ export class IpcService {
       });
       window.workApi.onQueueUpdated?.(() => this.loadPending());
       window.workApi.onMaximizeState?.((s) => this.windowMaximized.set(!!s.maximized));
+      // Navigate to today summary when tray menu requests it
+      (window.workApi as any).onNavigateToday?.((day: string) => {
+        if (day) {
+          router.navigate(['/summary', day]);
+        }
+      });
+      // Bulk logging request from tray
+      (window.workApi as any).onDialogOpenLogAll?.(() => {
+        this.bulkSelectAllFlag.set(true);
+      });
     } catch { /* ignore */ }
   }
 
@@ -116,6 +130,7 @@ export class IpcService {
       })
       .catch(err => console.error('[ipc] saveSettings failed', err));
   }
+
 
   submitPending(slots: string[], description: string, category: string) {
     return window.workApi.submitSlots({ slots, description, category })

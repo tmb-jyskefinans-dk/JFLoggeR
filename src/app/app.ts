@@ -36,6 +36,24 @@ export class AppComponent {
         this.handledPromptSlot.set(slot);
       }
     });
+
+    // Manual tray-triggered open should always open even if same slot was previously handled.
+    try {
+      (window as any).workApi.onDialogOpenLog?.((slot?: string) => {
+        if (!this.dialogOpen()) {
+          this.dialogOpen.set(true);
+        } else {
+          // If already open and a different slot arrives, mark handledPromptSlot so selection logic updates.
+          if (slot && slot !== this.handledPromptSlot()) this.handledPromptSlot.set(slot);
+        }
+      });
+      (window as any).workApi.onDialogOpenLogAll?.(() => {
+        // Force open dialog; selection will be handled in LogDialog ngOnInit via bulkSelectAllFlag.
+        if (!this.dialogOpen()) this.dialogOpen.set(true); else {
+          // If already open we can retrigger by closing & reopening or simply rely on user adjusting selection; keep open.
+        }
+      });
+    } catch { /* ignore */ }
   }
 
   openDialog() { this.dialogOpen.set(true); }

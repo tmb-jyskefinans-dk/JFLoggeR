@@ -5,6 +5,7 @@ const tslib_1 = require("tslib");
 const electron_1 = require("electron");
 const node_path_1 = tslib_1.__importDefault(require("node:path"));
 const db_1 = require("./db");
+const stale_1 = require("./stale");
 const time_1 = require("./time");
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
@@ -16,8 +17,13 @@ try {
 }
 catch { /* ignore if module missing in dev */ }
 let win = null;
+let tray = null;
 const pending = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 let tickerHandle = null; // current scheduled tick timeout
+let staleCheckHandle = null;
+let lastStaleNotifiedKey = null;
+let digestQueue = []; // slots accumulated while user away
+let lastEntryEndTime = null; // for stale detection heuristics
 function createWindow() {
     win = new electron_1.BrowserWindow({
         width: 1380,
@@ -49,6 +55,47 @@ function createWindow() {
     win.on('unmaximize', () => win?.webContents.send('window:maximize-state', { maximized: false }));
     win.on('enter-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: true }));
     win.on('leave-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: win?.isMaximized() ?? false }));
+}
+function updateTrayTooltip() {
+    try {
+        if (!tray)
+            return;
+        const today = (0, time_1.toLocalDateYMD)(new Date());
+        const summary = (0, db_1.getSummary)(today);
+        const top = summary.slice(0, 3).map(s => `${s.category}: ${s.minutes}m`).join(' | ');
+        const total = summary.reduce((a, s) => a + s.minutes, 0);
+        tray.setToolTip(top ? `${today} • ${top} • Total: ${total}m` : `${today} • Ingen registreringer endnu`);
+    }
+    catch (e) {
+        console.error('[main] updateTrayTooltip failed', e);
+    }
+}
+function showDigestNotification() {
+    if (!digestQueue.length)
+        return;
+    const first = digestQueue[0];
+    const last = digestQueue[digestQueue.length - 1];
+    const body = `${digestQueue.length} uloggede intervaller fra ${first.getHours().toString().padStart(2, '0')}:${first.getMinutes().toString().padStart(2, '0')} til ${last.getHours().toString().padStart(2, '0')}:${last.getMinutes().toString().padStart(2, '0')}`;
+    const st = (0, db_1.getSettings)();
+    const n = new electron_1.Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
+    n.on('click', () => {
+        if (win) {
+            try {
+                if (win.isMinimized())
+                    win.restore();
+            }
+            catch { }
+            try {
+                win.show();
+                win.focus();
+            }
+            catch { }
+            // Open prompt for earliest slot
+            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(digestQueue[0]) });
+        }
+    });
+    n.show();
+    digestQueue = [];
 }
 function notifyForSlot(slot) {
     const day = (0, time_1.toLocalDateYMD)(slot);
@@ -89,7 +136,23 @@ function notifyForSlot(slot) {
             console.warn('[main] notification clicked but window is null');
         }
     });
-    n.show();
+    // Group notifications when user away & grouping enabled
+    try {
+        const away = !win?.isFocused() || electron_1.powerMonitor.getSystemIdleTime() > ((0, time_1.getSlotMinutes)() * 60);
+        if (away && st.group_notifications) {
+            digestQueue.push(slot);
+            // If many accumulated, send digest now
+            if (digestQueue.length >= 4) {
+                showDigestNotification();
+            }
+        }
+        else {
+            n.show();
+        }
+    }
+    catch {
+        n.show();
+    }
 }
 function scheduleTicker() {
     if (tickerHandle) {
@@ -169,6 +232,38 @@ function restartTickerIfWorkdayNow() {
     if ((0, time_1.isWorkdayEnabled)(now))
         scheduleTicker();
 }
+function scheduleStaleCheck() {
+    if (staleCheckHandle) {
+        try {
+            clearInterval(staleCheckHandle);
+        }
+        catch { }
+    }
+    staleCheckHandle = setInterval(() => {
+        try {
+            const st = (0, db_1.getSettings)();
+            const result = (0, stale_1.computeStaleSlot)(Array.from(pending), new Date(), st, (0, time_1.getSlotMinutes)());
+            if (result && result.key !== lastStaleNotifiedKey) {
+                lastStaleNotifiedKey = result.key;
+                const hm = result.key.split('T')[1];
+                const body = `Interval fra ${hm} er over ${Math.round(result.ageMinutes)} min uden registrering. Overvej at splitte eller annotere.`;
+                const n = new electron_1.Notification({ title: 'Overvokset interval', body, silent: !!st.notification_silent });
+                n.on('click', () => {
+                    if (win) {
+                        try {
+                            win.show();
+                            win.focus();
+                        }
+                        catch { }
+                        win?.webContents.send('prompt:open', { slot: result.key });
+                    }
+                });
+                n.show();
+            }
+        }
+        catch { /* ignore */ }
+    }, 60000);
+}
 function rebuildBacklogForToday({ includeFuture = false } = {}) {
     // Build backlog only for past (and optionally current) unlogged slots.
     const now = new Date();
@@ -239,6 +334,11 @@ electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
     const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
     // When enabling mid-workday we now WAIT until next boundary (end of current slot) instead of immediate catch-up.
     restartTickerIfWorkdayNow();
+    // Apply auto-start setting (Windows/macOS)
+    try {
+        electron_1.app.setLoginItemSettings({ openAtLogin: !!after.auto_start_on_login });
+    }
+    catch { }
     return { ok: true, settings: after };
 });
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
@@ -282,6 +382,21 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
         pending.delete(k);
     });
     groupedByDay.forEach((list) => (0, db_1.saveEntries)(list));
+    // Update lastEntryEndTime for today
+    try {
+        const today = (0, time_1.toLocalDateYMD)(new Date());
+        const todayEntries = (0, db_1.getDayEntries)(today);
+        if (todayEntries.length) {
+            const last = todayEntries[todayEntries.length - 1];
+            if (last?.end) {
+                const [hh, mm] = last.end.split(':').map(Number);
+                const [y, mo, d] = today.split('-').map(Number);
+                lastEntryEndTime = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
+            }
+        }
+    }
+    catch { }
+    updateTrayTooltip();
     return { ok: true };
 });
 // Debug notification trigger (manual test without waiting for scheduler)
@@ -315,6 +430,123 @@ electron_1.app.whenReady().then(() => {
     (0, db_1.initDb)();
     console.log('[main] creating main window...');
     createWindow();
+    // Create tray icon
+    try {
+        const iconPath = node_path_1.default.join(__dirname, 'icon.png');
+        let img;
+        try {
+            img = electron_1.nativeImage.createFromPath(iconPath);
+        }
+        catch { }
+        tray = new electron_1.Tray(img && !img.isEmpty() ? img : electron_1.nativeImage.createEmpty());
+        updateTrayTooltip();
+        // Provide a context menu so user can interact with the app from the tray
+        try {
+            const trayMenu = electron_1.Menu.buildFromTemplate([
+                {
+                    label: 'Vis / Skjul',
+                    click: () => {
+                        if (!win)
+                            return;
+                        try {
+                            if (win.isVisible()) {
+                                win.hide();
+                            }
+                            else {
+                                win.show();
+                                win.focus();
+                            }
+                        }
+                        catch { }
+                    }
+                },
+                {
+                    label: 'Log nu',
+                    click: () => {
+                        if (!win)
+                            return;
+                        try {
+                            win.show();
+                            win.focus();
+                        }
+                        catch { }
+                        // Open prompt for the slot that just finished (previous slot) so user can log immediately.
+                        const prev = (0, time_1.previousSlotStart)(new Date());
+                        const key = (0, time_1.slotKey)(prev);
+                        // Emit both prompt (for selection logic) and a manual dialog open event that bypasses handledPromptSlot gating.
+                        win?.webContents.send('prompt:open', { slot: key });
+                        win?.webContents.send('dialog:open-log', { slot: key });
+                    }
+                },
+                {
+                    label: 'Log alle ventende',
+                    click: () => {
+                        if (!win)
+                            return;
+                        try {
+                            win.show();
+                            win.focus();
+                        }
+                        catch { }
+                        // Only open bulk dialog if there are pending slots
+                        if (pending.size > 0) {
+                            win?.webContents.send('dialog:open-log-all');
+                        }
+                        else {
+                            // Optionally could show a notification; for now silently ignore.
+                            console.log('[main] bulk log requested but no pending slots');
+                        }
+                    }
+                },
+                {
+                    label: 'Gå til i dag',
+                    click: () => {
+                        if (!win)
+                            return;
+                        try {
+                            win.show();
+                            win.focus();
+                        }
+                        catch { }
+                        // Send explicit navigate event for today summary view
+                        const today = (0, time_1.toLocalDateYMD)(new Date());
+                        win?.webContents.send('navigate:today', { day: today });
+                    }
+                },
+                { type: 'separator' },
+                {
+                    label: 'Afslut',
+                    click: () => { try {
+                        electron_1.app.quit();
+                    }
+                    catch { } }
+                }
+            ]);
+            tray.setContextMenu(trayMenu);
+            // Left-click toggles window visibility for quick access
+            tray.on('click', () => {
+                if (!win)
+                    return;
+                try {
+                    if (win.isVisible()) {
+                        // On Windows a single click often means "show"; keep behavior consistent: always show & focus
+                        win.focus();
+                    }
+                    else {
+                        win.show();
+                        win.focus();
+                    }
+                }
+                catch { }
+            });
+        }
+        catch (menuErr) {
+            console.error('[main] tray menu init failed', menuErr);
+        }
+    }
+    catch (e) {
+        console.error('[main] tray init failed', e);
+    }
     // Remove default application menu (we provide custom controls in renderer)
     try {
         electron_1.Menu.setApplicationMenu(null);
@@ -324,6 +556,7 @@ electron_1.app.whenReady().then(() => {
     rebuildBacklogForToday({ includeFuture: false });
     console.log('[main] scheduling ticker for notifications...');
     scheduleTicker();
+    scheduleStaleCheck();
     console.log('[main] initialization complete.');
     // Signal to renderer that core initialization (handlers + DB + window) is complete
     win?.webContents.send('app:ready');
@@ -332,6 +565,12 @@ electron_1.app.whenReady().then(() => {
         console.log('[main] app activate event');
         if (electron_1.BrowserWindow.getAllWindows().length === 0)
             createWindow();
+    });
+    electron_1.app.on('browser-window-focus', () => {
+        // Flush digest queue when user returns
+        if (digestQueue.length) {
+            showDigestNotification();
+        }
     });
 });
 electron_1.app.on('window-all-closed', () => {

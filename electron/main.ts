@@ -1,5 +1,5 @@
 // electron/main.ts
-import { app, BrowserWindow, ipcMain, Notification, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor } from 'electron';
 import path from 'node:path';
 
 import {
@@ -14,6 +14,7 @@ import {
   saveSettings,
   deleteEntry
 } from './db';
+import { computeStaleSlot } from './stale';
 
 import {
   nextQuarter,
@@ -38,8 +39,13 @@ try {
 } catch { /* ignore if module missing in dev */ }
 
 let win: BrowserWindow | null = null;
+let tray: Tray | null = null;
 const pending: Set<string> = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 let tickerHandle: NodeJS.Timeout | null = null; // current scheduled tick timeout
+let staleCheckHandle: NodeJS.Timeout | null = null;
+let lastStaleNotifiedKey: string | null = null;
+let digestQueue: Date[] = []; // slots accumulated while user away
+let lastEntryEndTime: Date | null = null; // for stale detection heuristics
 
 function createWindow() {
   win = new BrowserWindow({
@@ -77,6 +83,36 @@ function createWindow() {
   win.on('leave-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: win?.isMaximized() ?? false }));
 }
 
+function updateTrayTooltip() {
+  try {
+    if (!tray) return;
+    const today = toLocalDateYMD(new Date());
+    const summary = getSummary(today) as any[];
+    const top = summary.slice(0,3).map(s => `${s.category}: ${s.minutes}m`).join(' | ');
+    const total = summary.reduce((a,s)=> a + s.minutes, 0);
+    tray.setToolTip(top ? `${today} • ${top} • Total: ${total}m` : `${today} • Ingen registreringer endnu`);
+  } catch (e) { console.error('[main] updateTrayTooltip failed', e); }
+}
+
+function showDigestNotification() {
+  if (!digestQueue.length) return;
+  const first = digestQueue[0];
+  const last = digestQueue[digestQueue.length - 1];
+  const body = `${digestQueue.length} uloggede intervaller fra ${first.getHours().toString().padStart(2,'0')}:${first.getMinutes().toString().padStart(2,'0')} til ${last.getHours().toString().padStart(2,'0')}:${last.getMinutes().toString().padStart(2,'0')}`;
+  const st = getSettings();
+  const n = new Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
+  n.on('click', () => {
+    if (win) {
+      try { if (win.isMinimized()) win.restore(); } catch {}
+      try { win.show(); win.focus(); } catch {}
+      // Open prompt for earliest slot
+      win?.webContents.send('prompt:open', { slot: slotKey(digestQueue[0]) });
+    }
+  });
+  n.show();
+  digestQueue = [];
+}
+
 function notifyForSlot(slot: Date) {
   const day = toLocalDateYMD(slot);
   const hh = `${slot.getHours()}`.padStart(2, '0');
@@ -98,7 +134,19 @@ function notifyForSlot(slot: Date) {
       console.warn('[main] notification clicked but window is null');
     }
   });
-  n.show();
+  // Group notifications when user away & grouping enabled
+  try {
+    const away = !win?.isFocused() || powerMonitor.getSystemIdleTime() > (getSlotMinutes() * 60);
+    if (away && st.group_notifications) {
+      digestQueue.push(slot);
+      // If many accumulated, send digest now
+      if (digestQueue.length >= 4) {
+        showDigestNotification();
+      }
+    } else {
+      n.show();
+    }
+  } catch { n.show(); }
 }
 
 function scheduleTicker() {
@@ -145,6 +193,29 @@ function scheduleTicker() {
 function restartTickerIfWorkdayNow() {
   const now = new Date();
   if (isWorkdayEnabled(now)) scheduleTicker();
+}
+
+function scheduleStaleCheck() {
+  if (staleCheckHandle) { try { clearInterval(staleCheckHandle); } catch {} }
+  staleCheckHandle = setInterval(() => {
+    try {
+      const st = getSettings();
+      const result = computeStaleSlot(Array.from(pending), new Date(), st, getSlotMinutes());
+      if (result && result.key !== lastStaleNotifiedKey) {
+        lastStaleNotifiedKey = result.key;
+        const hm = result.key.split('T')[1];
+  const body = `Interval fra ${hm} er nu over ${Math.round(result.ageMinutes)} min uden registrering. Log tiden for at undgå at glemme den.`;
+        const n = new Notification({ title: 'Overvokset interval', body, silent: !!st.notification_silent });
+        n.on('click', () => {
+          if (win) {
+            try { win.show(); win.focus(); } catch {}
+            win?.webContents.send('prompt:open', { slot: result.key });
+          }
+        });
+        n.show();
+      }
+    } catch {/* ignore */}
+  }, 60000);
 }
 
 function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boolean } = {}) {
@@ -218,6 +289,8 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
   // When enabling mid-workday we now WAIT until next boundary (end of current slot) instead of immediate catch-up.
   restartTickerIfWorkdayNow();
+  // Apply auto-start setting (Windows/macOS)
+  try { app.setLoginItemSettings({ openAtLogin: !!after.auto_start_on_login }); } catch {}
   return { ok: true, settings: after };
 });
 
@@ -270,6 +343,20 @@ ipcMain.handle(
       pending.delete(k);
     });
     groupedByDay.forEach((list) => saveEntries(list));
+    // Update lastEntryEndTime for today
+    try {
+      const today = toLocalDateYMD(new Date());
+      const todayEntries = getDayEntries(today);
+      if (todayEntries.length) {
+        const last = todayEntries[todayEntries.length - 1];
+        if (last?.end) {
+          const [hh,mm] = last.end.split(':').map(Number);
+          const [y,mo,d] = today.split('-').map(Number);
+          lastEntryEndTime = new Date(y,(mo||1)-1,d||1,hh,mm,0,0);
+        }
+      }
+    } catch {}
+    updateTrayTooltip();
     return { ok: true };
   }
 );
@@ -303,12 +390,95 @@ app.whenReady().then(() => {
   initDb();
   console.log('[main] creating main window...');
   createWindow();
+  // Create tray icon
+  try {
+    const iconPath = path.join(__dirname, 'icon.png');
+    let img: any;
+    try { img = nativeImage.createFromPath(iconPath); } catch {}
+    tray = new Tray(img && !img.isEmpty() ? img : nativeImage.createEmpty());
+    updateTrayTooltip();
+    // Provide a context menu so user can interact with the app from the tray
+    try {
+      const trayMenu = Menu.buildFromTemplate([
+        {
+          label: 'Vis / Skjul',
+          click: () => {
+            if (!win) return;
+            try {
+              if (win.isVisible()) {
+                win.hide();
+              } else {
+                win.show();
+                win.focus();
+              }
+            } catch {}
+          }
+        },
+        {
+          label: 'Log nu',
+          click: () => {
+            if (!win) return;
+            try { win.show(); win.focus(); } catch {}
+            // Open prompt for the slot that just finished (previous slot) so user can log immediately.
+            const prev = previousSlotStart(new Date());
+            const key = slotKey(prev);
+            // Emit both prompt (for selection logic) and a manual dialog open event that bypasses handledPromptSlot gating.
+            win?.webContents.send('prompt:open', { slot: key });
+            win?.webContents.send('dialog:open-log', { slot: key });
+          }
+        },
+        {
+          label: 'Log alle ventende',
+          click: () => {
+            if (!win) return;
+            try { win.show(); win.focus(); } catch {}
+            // Only open bulk dialog if there are pending slots
+            if (pending.size > 0) {
+              win?.webContents.send('dialog:open-log-all');
+            } else {
+              // Optionally could show a notification; for now silently ignore.
+              console.log('[main] bulk log requested but no pending slots');
+            }
+          }
+        },
+        {
+          label: 'Gå til i dag',
+          click: () => {
+            if (!win) return;
+            try { win.show(); win.focus(); } catch {}
+            // Send explicit navigate event for today summary view
+            const today = toLocalDateYMD(new Date());
+            win?.webContents.send('navigate:today', { day: today });
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Afslut',
+          click: () => { try { app.quit(); } catch {} }
+        }
+      ]);
+      tray.setContextMenu(trayMenu);
+      // Left-click toggles window visibility for quick access
+      tray.on('click', () => {
+        if (!win) return;
+        try {
+          if (win.isVisible()) {
+            // On Windows a single click often means "show"; keep behavior consistent: always show & focus
+            win.focus();
+          } else {
+            win.show(); win.focus();
+          }
+        } catch {}
+      });
+    } catch (menuErr) { console.error('[main] tray menu init failed', menuErr); }
+  } catch (e) { console.error('[main] tray init failed', e); }
   // Remove default application menu (we provide custom controls in renderer)
   try { Menu.setApplicationMenu(null); } catch {}
   console.log('[main] rebuilding backlog for today...');
   rebuildBacklogForToday({ includeFuture: false });
   console.log('[main] scheduling ticker for notifications...');
   scheduleTicker();
+  scheduleStaleCheck();
   console.log('[main] initialization complete.');
 
   // Signal to renderer that core initialization (handlers + DB + window) is complete
@@ -318,6 +488,12 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     console.log('[main] app activate event');
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+  app.on('browser-window-focus', () => {
+    // Flush digest queue when user returns
+    if (digestQueue.length) {
+      showDigestNotification();
+    }
   });
 });
 

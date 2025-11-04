@@ -76,7 +76,6 @@ export class SummaryViewComponent implements AfterViewInit  {
       const g = groups.get(root)!;
       g.slots += r.slots;
       g.minutes += r.minutes;
-      // accumulate child category inside group
       const childIdx = g.children.findIndex(c => c.category === r.category);
       if (childIdx >= 0) {
         g.children[childIdx].slots += r.slots;
@@ -85,11 +84,23 @@ export class SummaryViewComponent implements AfterViewInit  {
         g.children.push({ category: r.category, slots: r.slots, minutes: r.minutes });
       }
     }
-    // Sort children within each group
+    // Sort children within each group by minutes desc for readability
     for (const g of groups.values()) {
       g.children.sort((a,b)=> b.minutes - a.minutes || a.category.localeCompare(b.category));
     }
-    return Array.from(groups.values()).sort((a,b)=> b.minutes - a.minutes || a.label.localeCompare(b.label));
+    // Order root groups to match CATEGORY_GROUPS declaration order rather than minutes
+    const orderedLabels: string[] = [];
+    for (const g of CATEGORY_GROUPS) {
+      if (groups.has(g.label)) orderedLabels.push(g.label);
+    }
+    // Append any extra groups (e.g. 'Andet') not in CATEGORY_GROUPS at the end in stable alpha order
+    const extras: string[] = [];
+    for (const k of groups.keys()) {
+      if (!CATEGORY_GROUPS.some(g => g.label === k)) extras.push(k);
+    }
+    extras.sort((a,b)=> a.localeCompare(b));
+    const finalOrder = [...orderedLabels, ...extras];
+    return finalOrder.map(label => groups.get(label)!).filter(Boolean);
   });
 
   // Animation triggers
@@ -186,18 +197,19 @@ export class SummaryViewComponent implements AfterViewInit  {
       if (!d) return;
       const req = ++this.lastRequest;
       this.loading.set(true);
+      // Load data; only trigger animation reset AFTER data finishes so first render shows 0-width bars before animating.
       this.ipc.loadDay(d).finally(() => {
-        if (req === this.lastRequest) this.loading.set(false);
+        if (req === this.lastRequest) {
+          this.loading.set(false);
+          // Day change toast (skip first initialization)
+          if (this.initialized) {
+            this.showToast(`Dag ændret til ${d}`);
+          } else {
+            this.initialized = true;
+          }
+          this.resetAnimations();
+        }
       });
-      // Day change toast (skip first initialization)
-      if (this.initialized) {
-        this.showToast(`Dag ændret til ${d}`);
-        this.resetAnimations();
-      } else {
-        this.initialized = true;
-        // initial animation start after first data load
-        this.resetAnimations();
-      }
     });
   }
 
@@ -219,8 +231,8 @@ export class SummaryViewComponent implements AfterViewInit  {
   }
 
   ngAfterViewInit() {
-    // Kick off animations once view is ready
-    this.startAnimations();
+    // No immediate start; resetAnimations schedules start after data load completes.
+    // If data already loaded before view init (unlikely), the pending timeout will still fire.
   }
 
   private resetAnimations() {

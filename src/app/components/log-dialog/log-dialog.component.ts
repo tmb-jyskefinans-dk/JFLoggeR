@@ -40,6 +40,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   description = '';
   category = '';
   andetDescription = '';
+  // Suggestion feature removed; keeping component lean.
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
   unmatchedCategory(): boolean {
     const c = this.category?.trim();
@@ -53,12 +54,19 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     const list = this.ipc.pendingSlots();
     const promptSlot = this.ipc.lastPromptSlot ? this.ipc.lastPromptSlot() : null;
     console.log(promptSlot, list);
-    if (promptSlot && list.includes(promptSlot)) {
-      // Prefer the slot that triggered the dialog
-      this.selectedSlots.set([promptSlot]);
-    } else if (list.length) {
-      // Fallback: first pending slot
-      this.selectedSlots.set(list.slice(0, 1));
+    if (this.ipc.bulkSelectAllFlag && this.ipc.bulkSelectAllFlag()) {
+      // Bulk selection mode triggered from tray
+      this.selectedSlots.set([...list].sort());
+      // Reset flag so future opens revert to normal selection heuristics
+      this.ipc.bulkSelectAllFlag.set(false);
+    } else {
+      if (promptSlot && list.includes(promptSlot)) {
+        // Prefer the slot that triggered the dialog
+        this.selectedSlots.set([promptSlot]);
+      } else if (list.length) {
+        // Fallback: first pending slot
+        this.selectedSlots.set(list.slice(0, 1));
+      }
     }
     this.ipc.loadRecent();
   }
@@ -109,6 +117,8 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     this.closed.emit();
   }
 
+  // Removed suggestion-related methods (refreshSuggestion, applySuggestion, applyWeakMatch).
+
   // Reactive safeguard: if the prompt slot arrives AFTER dialog creation (race), select it.
   private promptSlotSync = effect(() => {
     const ps = this.ipc.lastPromptSlot();
@@ -120,4 +130,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
       this.selectedSlots.set([ps]);
     }
   });
+
+  // React to description changes for suggestions (simple polling via effect over primitive fields)
+  // Suggestion effect removed.
 }

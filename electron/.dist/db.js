@@ -25,7 +25,10 @@ const DEFAULT_SETTINGS = {
     slot_minutes: 15,
     weekdays_mask: 0b0111110, // Mon–Fri
     auto_focus_on_slot: false,
-    notification_silent: true
+    notification_silent: true,
+    stale_threshold_minutes: 45,
+    auto_start_on_login: false,
+    group_notifications: true
 };
 let db;
 function ensureDb() {
@@ -66,6 +69,18 @@ function initDb() {
             db.data.settings.notification_silent = DEFAULT_SETTINGS.notification_silent;
             changed = true;
         }
+        if (typeof db.data.settings.stale_threshold_minutes !== 'number') {
+            db.data.settings.stale_threshold_minutes = DEFAULT_SETTINGS.stale_threshold_minutes;
+            changed = true;
+        }
+        if (typeof db.data.settings.auto_start_on_login !== 'boolean') {
+            db.data.settings.auto_start_on_login = DEFAULT_SETTINGS.auto_start_on_login;
+            changed = true;
+        }
+        if (typeof db.data.settings.group_notifications !== 'boolean') {
+            db.data.settings.group_notifications = DEFAULT_SETTINGS.group_notifications;
+            changed = true;
+        }
     }
     if (typeof db.data._seq !== 'number') {
         db.data._seq = 1;
@@ -93,7 +108,10 @@ function saveSettings(s) {
         slot_minutes: Number(s.slot_minutes) || 15,
         weekdays_mask: Number(s.weekdays_mask) >>> 0,
         auto_focus_on_slot: !!s.auto_focus_on_slot,
-        notification_silent: !!s.notification_silent
+        notification_silent: !!s.notification_silent,
+        stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes,
+        auto_start_on_login: !!s.auto_start_on_login,
+        group_notifications: !!s.group_notifications
     };
     db.write();
 }
@@ -155,6 +173,8 @@ function getSummary(day) {
         .map(g => ({ ...g, minutes: g.slots * s.slot_minutes }))
         .sort((a, b) => b.minutes - a.minutes || a.description.localeCompare(b.description));
 }
+// Suggest a category for a given description based on historical usage excluding 'Andet'
+// Category suggestion feature removed.
 function getDistinctRecent(limit = 20) {
     ensureDb();
     db.read();

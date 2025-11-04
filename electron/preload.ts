@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('workApi', {
   onAppReady: (cb: () => void) => ipcRenderer.once('app:ready', cb),
   // Queue update event (pending slots rebuilt)
   onQueueUpdated: (cb: () => void) => ipcRenderer.on('queue:updated', cb),
+  // Navigation events
+  onNavigateToday: (cb: (day: string) => void) => ipcRenderer.on('navigate:today', (_e, d: { day: string }) => cb(d.day)),
+  onDialogOpenLog: (cb: (slot?: string) => void) => ipcRenderer.on('dialog:open-log', (_e, d: { slot?: string }) => cb(d?.slot)),
+  onDialogOpenLogAll: (cb: () => void) => ipcRenderer.on('dialog:open-log-all', () => cb()),
   // Debug notification trigger
   sendTestNotification: (body?: string) => ipcRenderer.invoke('debug:notify', { body })
   ,

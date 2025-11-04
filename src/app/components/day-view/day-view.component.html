@@ -23,8 +23,8 @@
               <td>{{e.end}}</td>
               <td>{{e.description}}</td>
               <td>
-                <span [style.background]="getCategoryColor(e.category)" class="inline-block w-3 h-3 rounded-sm align-middle mr-2"></span>
-                <span [style.color]="getCategoryColor(e.category)" class="font-semibold">{{e.category}}</span>
+                <span [style.background]="getColor(e.category)" class="inline-block w-3 h-3 rounded-sm align-middle mr-2"></span>
+                <span [style.color]="getColor(e.category)" class="font-semibold">{{e.category}}</span>
               </td>
               <td>
                 <button type="button"
