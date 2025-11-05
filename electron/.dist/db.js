@@ -10,6 +10,8 @@ exports.getSummary = getSummary;
 exports.getDistinctRecent = getDistinctRecent;
 exports.getDistinctRecentToday = getDistinctRecentToday;
 exports.deleteEntry = deleteEntry;
+exports.getExternalLogged = getExternalLogged;
+exports.setExternalLogged = setExternalLogged;
 exports.ensureDayCreated = ensureDayCreated;
 exports.lastNEntries = lastNEntries;
 const tslib_1 = require("tslib");
@@ -90,6 +92,10 @@ function initDb() {
         db.data.entries = [];
         changed = true;
     }
+    if (!db.data.external_logged || typeof db.data.external_logged !== 'object') {
+        db.data.external_logged = {};
+        changed = true;
+    }
     if (changed)
         db.write();
 }
@@ -154,7 +160,7 @@ function getDays() {
         counts.set(e.day, (counts.get(e.day) ?? 0) + 1);
     }
     return Array.from(counts.entries())
-        .map(([day, slots]) => ({ day, slots }))
+        .map(([day, slots]) => ({ day, slots, exported: !!db.data.external_logged?.[day] }))
         .sort((a, b) => b.day.localeCompare(a.day));
 }
 function getSummary(day) {
@@ -230,6 +236,21 @@ function deleteEntry(day, start) {
         return 1;
     }
     return 0;
+}
+/** External logged status helpers */
+function getExternalLogged(day) {
+    ensureDb();
+    db.read();
+    return !!db.data.external_logged?.[day];
+}
+function setExternalLogged(day, val) {
+    ensureDb();
+    db.read();
+    if (!db.data.external_logged)
+        db.data.external_logged = {};
+    db.data.external_logged[day] = !!val;
+    db.write();
+    return { day, exported: !!val };
 }
 /** Convenience (kept for API parity) */
 function ensureDayCreated(day) { return day; }

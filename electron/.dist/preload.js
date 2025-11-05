@@ -13,6 +13,9 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     getSettings: () => electron_1.ipcRenderer.invoke('db:get-settings'),
     saveSettings: (s) => electron_1.ipcRenderer.invoke('db:save-settings', s),
     deleteEntry: (day, start) => electron_1.ipcRenderer.invoke('db:delete-entry', day, start),
+    // External logged status
+    getExternalLogged: (day) => electron_1.ipcRenderer.invoke('db:get-external-logged', day),
+    setExternalLogged: (day, exported) => electron_1.ipcRenderer.invoke('db:set-external-logged', day, exported),
     // Backlog queue
     getPendingSlots: () => electron_1.ipcRenderer.invoke('queue:get'),
     submitSlots: (payload) => electron_1.ipcRenderer.invoke('queue:submit', payload),

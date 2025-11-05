@@ -53,11 +53,24 @@
   <div class="overflow-auto max-h-[55vh] pr-1" aria-label="Andre registrerede dage">
       <ul class="text-sm space-y-1">
         @for(d of daysWithWeekday(); track d.day) {
-          <li class="py-1 flex items-center justify-between">
-            <a class="underline hover:text-indigo-600 dark:text-indigo-300 dark:hover:text-indigo-200" [routerLink]="['/day', d.day]">
-              <span class="text-indigo-600 dark:text-indigo-300 font-semibold">{{d.weekday}}</span> {{d.day}}
-            </a>
-            <span class="text-xs text-slate-500 dark:text-slate-400">{{d.slots}} intervaller</span>
+          <li class="py-1 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+      <button type="button"
+          class="relative inline-flex items-center justify-center w-4 h-4 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+          (click)="toggleExportedDot(d.day)"
+          [attr.aria-label]="d.exported ? (d.day + ' afstemt') : ('Afstem ' + d.day)"
+          title="Afstem status">
+        <!-- Small dot for visual (keeps larger focus target for accessibility) -->
+        <span class="block w-2 h-2 rounded-full"
+          [style.background]="d.exported ? 'var(--tw-color-emerald-600,#059669)' : 'var(--tw-color-slate-300,#cbd5e1)'"
+          aria-hidden="true"></span>
+        <span class="sr-only">{{ d.exported ? 'Afstemt' : 'Ikke afstemt' }}</span>
+      </button>
+              <a class="underline hover:text-indigo-600 dark:text-indigo-300 dark:hover:text-indigo-200" [routerLink]="['/day', d.day]" [attr.aria-label]="'Vis dag ' + d.day">
+                <span class="text-indigo-600 dark:text-indigo-300 font-semibold">{{d.weekday}}</span> {{d.day}}
+              </a>
+            </div>
+            <span class="text-xs text-slate-500 dark:text-slate-400" [attr.aria-label]="d.slots + ' intervaller'">{{d.slots}} intervaller</span>
           </li>
         }
       </ul>

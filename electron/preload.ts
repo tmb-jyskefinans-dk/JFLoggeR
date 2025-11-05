@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('workApi', {
   getSettings: () => ipcRenderer.invoke('db:get-settings'),
   saveSettings: (s: any) => ipcRenderer.invoke('db:save-settings', s),
   deleteEntry: (day: string, start: string) => ipcRenderer.invoke('db:delete-entry', day, start),
+  // External logged status
+  getExternalLogged: (day: string) => ipcRenderer.invoke('db:get-external-logged', day),
+  setExternalLogged: (day: string, exported: boolean) => ipcRenderer.invoke('db:set-external-logged', day, exported),
 
   // Backlog queue
   getPendingSlots: () => ipcRenderer.invoke('queue:get'),

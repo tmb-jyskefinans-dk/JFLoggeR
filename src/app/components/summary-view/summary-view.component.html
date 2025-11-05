@@ -10,16 +10,34 @@
   <!-- Top toolbar with navigation and charts -->
   <div class="flex flex-col gap-6">
     <div class="flex items-center gap-2 flex-wrap">
-      <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100 flex items-center gap-2">
+      <h2 class="text-lg font-semibold tracking-tight dark:text-slate-100 flex items-center gap-3">
         <span>Opsummering</span>
         <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200 text-sm font-medium" aria-label="Valgt dag">{{day()}}</span>
+  <!-- Removed afstemt status dot from summary header per request -->
       </h2>
-      <div class="flex items-center gap-2 ml-auto" aria-label="Dagnavigation" role="group">
+      <div class="flex items-center gap-2 ml-auto flex-wrap" aria-label="Dagnavigation" role="group">
         <label class="sr-only" for="dayPicker">Vælg dag</label>
         <input id="dayPicker" type="date" class="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 h-8 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" [value]="day()" [max]="day()" (change)="gotoDay($event.target.value)" aria-label="Vælg dato" />
         <button type="button" (click)="gotoDay(prevDay())" [disabled]="!prevDay()" class="inline-flex items-center gap-1 rounded-md px-3 h-8 text-xs font-medium border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" aria-label="Forrige dag" title="Forrige dag (Pil venstre)">←</button>
         <button type="button" (click)="gotoToday()" [disabled]="isToday()" class="inline-flex items-center gap-1 rounded-md px-3 h-8 text-xs font-medium border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" aria-label="Gå til i dag" title="I dag (T)">I dag</button>
         <button type="button" (click)="gotoDay(nextDay())" [disabled]="!nextDay()" class="inline-flex items-center gap-1 rounded-md px-3 h-8 text-xs font-medium border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" aria-label="Næste dag" title="Næste dag (Pil højre)">→</button>
+        <!-- Afstemt toggle moved next to Export button for clearer workflow grouping -->
+  <label class="group relative inline-flex items-center gap-1 text-xs font-medium select-none cursor-pointer h-8"
+               [attr.aria-label]="exported() ? 'Dagen er afstemt' : 'Afstem dagen'">
+          <input type="checkbox" class="peer sr-only" [checked]="exported()" (change)="onToggleExported($event)" aria-checked="{{exported() ? 'true' : 'false'}}" />
+      <span class="inline-flex items-center gap-1 px-3 h-8 rounded-md border transition-colors select-none"
+        [class]="exported() ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-700/30 dark:text-emerald-200 dark:border-emerald-400' : 'border-slate-300 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300'">
+            @if(exported()) {
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            } @else {
+              <svg class="w-3.5 h-3.5 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+            }
+            <span class="inline-block" [style.fontWeight]="exported() ? '600' : '500'">Afstemt</span>
+          </span>
+          <span class="absolute -bottom-7 left-0 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none text-[10px] bg-slate-900 text-white px-2 py-1 rounded shadow transition-opacity" role="tooltip">
+            {{ exported() ? 'Afstemt' : 'Klik for at afstemme' }}
+          </span>
+        </label>
         <button (click)="exportExcel()" class="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold px-3 h-8 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" aria-label="Exportér opsummering til Excel" [disabled]="!rows().length">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v4H4z"/><path d="M4 12h16v8H4z"/><path d="M4 4v16"/><path d="M10 8v8"/><path d="M14 8v8"/><path d="M4 12h16"/></svg>
           <span>Export</span>

@@ -54,7 +54,8 @@ export class DayViewComponent  {
   daysWithWeekday = computed(() => this.days().map(d => {
     const [y,m,dd] = d.day.split('-').map(Number);
     const dt = new Date(y,(m||1)-1,dd||1);
-    return { ...d, weekday: this.weekdayNames[dt.getDay()] };
+    const exported = this.ipc.dayExported().get(d.day) || false;
+    return { ...d, weekday: this.weekdayNames[dt.getDay()], exported };
   }));
 
   // Optional computed: count of entries (could drive badge etc.)
@@ -80,5 +81,18 @@ export class DayViewComponent  {
   remove(e: any) {
     if (!e || !e.day || !e.start) return;
     this.ipc.deleteEntry(e.day, e.start);
+  }
+
+  toggleExported(day: string, ev: Event) {
+    const target = ev.target as HTMLInputElement | null;
+    if (!day || !target) return;
+    this.ipc.setDayExported(day, !!target.checked);
+  }
+
+  // New helper for dot indicator (no native checkbox). Toggles by inverting current state.
+  toggleExportedDot(day: string) {
+    if (!day) return;
+    const current = this.ipc.dayExported().get(day) || false;
+    this.ipc.setDayExported(day, !current);
   }
 }

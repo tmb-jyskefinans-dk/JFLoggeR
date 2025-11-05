@@ -25,6 +25,8 @@ declare global {
   toggleMaximizeWindow?(): Promise<{ ok: boolean, maximized?: boolean }>;
   closeWindow?(): Promise<{ ok: boolean }>;
   onMaximizeState?(cb: (s: { maximized: boolean }) => void): void;
+  getExternalLogged?(day: string): Promise<{ day: string; exported: boolean }>;
+  setExternalLogged?(day: string, exported: boolean): Promise<{ day: string; exported: boolean }>;
     }
   }
 }
@@ -43,6 +45,8 @@ export class IpcService {
   windowMaximized = signal<boolean>(false);
   // Flag to indicate next opened log dialog should preselect all pending slots
   bulkSelectAllFlag = signal(false);
+  // External exported status map (day -> true if logged externally)
+  dayExported = signal<Map<string, boolean>>(new Map());
 
 
   constructor() {
@@ -87,7 +91,16 @@ export class IpcService {
     } catch { /* ignore */ }
   }
 
-  refreshDays() { window.workApi.getDays().then(this.days.set); }
+  refreshDays() {
+    window.workApi.getDays().then(list => {
+      const exportMap = new Map<string, boolean>();
+      for (const d of list) {
+        if (d.day) exportMap.set(d.day, !!(d as any).exported);
+      }
+      this.dayExported.set(exportMap);
+      this.days.set(list.map((d: any) => ({ day: d.day, slots: d.slots })));
+    });
+  }
 
   getDays(): Promise<any[]> {
     return window.workApi.getDays();
@@ -95,6 +108,11 @@ export class IpcService {
   loadDay(day: string): Promise<void> {
     const entriesP = window.workApi.getDayEntries(day).then(this.dayEntries.set);
     const summaryP = window.workApi.getSummary(day).then(this.summary.set);
+    if (window.workApi.getExternalLogged) {
+      window.workApi.getExternalLogged(day).then(resp => {
+        const m = new Map(this.dayExported()); m.set(day, !!resp.exported); this.dayExported.set(m);
+      }).catch(()=>{});
+    }
     return Promise.all([entriesP, summaryP]).then(() => {});
   }
   loadRecent() {
@@ -156,4 +174,15 @@ export class IpcService {
   minimizeWindow() { return window.workApi.minimizeWindow?.(); }
   toggleMaximizeWindow() { return window.workApi.toggleMaximizeWindow?.().then(r => { if (r?.maximized !== undefined) this.windowMaximized.set(!!r.maximized); }); }
   closeWindow() { return window.workApi.closeWindow?.(); }
+
+  // Toggle external logged flag for a day
+  setDayExported(day: string, exported: boolean) {
+    if (!day || !window.workApi.setExternalLogged) return Promise.resolve();
+    return window.workApi.setExternalLogged(day, exported)
+      .then(resp => {
+        const m = new Map(this.dayExported()); m.set(day, !!resp.exported); this.dayExported.set(m);
+        this.refreshDays();
+      })
+      .catch(err => console.error('[ipc] setDayExported failed', err));
+  }
 }

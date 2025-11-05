@@ -31,6 +31,7 @@ type Data = {
   entries: Entry[];
   settings: Settings;
   _seq: number;         // simple incremental id if you ever want it
+  external_logged?: { [day: string]: boolean }; // per-day external logging status (e.g., pushed to Jira / Excel)
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -88,6 +89,7 @@ export function initDb() {
   }
   if (typeof db.data._seq !== 'number') { db.data._seq = 1; changed = true; }
   if (!Array.isArray(db.data.entries)) { db.data.entries = []; changed = true; }
+  if (!db.data.external_logged || typeof db.data.external_logged !== 'object') { db.data.external_logged = {}; changed = true; }
   if (changed) db.write();
 }
 
@@ -160,7 +162,7 @@ export function getDays() {
     counts.set(e.day, (counts.get(e.day) ?? 0) + 1);
   }
   return Array.from(counts.entries())
-    .map(([day, slots]) => ({ day, slots }))
+    .map(([day, slots]) => ({ day, slots, exported: !!db.data!.external_logged?.[day] }))
     .sort((a,b)=> b.day.localeCompare(a.day));
 }
 
@@ -240,6 +242,18 @@ export function deleteEntry(day: string, start: string) {
     return 1;
   }
   return 0;
+}
+
+/** External logged status helpers */
+export function getExternalLogged(day: string): boolean {
+  ensureDb(); db.read(); return !!db.data!.external_logged?.[day];
+}
+export function setExternalLogged(day: string, val: boolean) {
+  ensureDb(); db.read();
+  if (!db.data!.external_logged) db.data!.external_logged = {};
+  db.data!.external_logged[day] = !!val;
+  db.write();
+  return { day, exported: !!val };
 }
 
 /** Convenience (kept for API parity) */

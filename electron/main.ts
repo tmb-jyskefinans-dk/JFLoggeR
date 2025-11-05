@@ -15,6 +15,7 @@ import {
   deleteEntry
 } from './db';
 import { computeStaleSlot } from './stale';
+import { setExternalLogged, getExternalLogged } from './db';
 
 import {
   nextQuarter,
@@ -47,6 +48,16 @@ let lastStaleNotifiedKey: string | null = null;
 let digestQueue: Date[] = []; // slots accumulated while user away
 let lastEntryEndTime: Date | null = null; // for stale detection heuristics
 
+// Centralized helper to add a slot key to the pending set and notify renderer.
+// Optionally suppress immediate event for bulk operations (caller emits once afterwards).
+function enqueuePending(key: string, opts: { silent?: boolean } = {}) {
+  if (!key) return;
+  if (!pending.has(key)) pending.add(key);
+  if (!opts.silent) {
+    try { win?.webContents.send('queue:updated'); } catch {}
+  }
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1380,
@@ -59,7 +70,10 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Ensure timers (notifications ticker, stale checks) continue firing with accurate cadence
+      // even when window is unfocused or minimized. This prevents delayed queue updates.
+      backgroundThrottling: false
     }
   });
 
@@ -96,17 +110,23 @@ function updateTrayTooltip() {
 
 function showDigestNotification() {
   if (!digestQueue.length) return;
-  const first = digestQueue[0];
-  const last = digestQueue[digestQueue.length - 1];
-  const body = `${digestQueue.length} uloggede intervaller fra ${first.getHours().toString().padStart(2,'0')}:${first.getMinutes().toString().padStart(2,'0')} til ${last.getHours().toString().padStart(2,'0')}:${last.getMinutes().toString().padStart(2,'0')}`;
+  // Capture the earliest & latest slot BEFORE we clear the queue so the notification click handler
+  // can reference a stable value. Previously we referenced digestQueue[0] inside the click handler
+  // after digestQueue was cleared, causing slotKey(undefined) -> TypeError.
+  const firstSlot = digestQueue[0];
+  const lastSlot = digestQueue[digestQueue.length - 1];
+  if (!firstSlot || !lastSlot) { digestQueue = []; return; }
+  const body = `${digestQueue.length} uloggede intervaller fra ${firstSlot.getHours().toString().padStart(2,'0')}:${firstSlot.getMinutes().toString().padStart(2,'0')} til ${lastSlot.getHours().toString().padStart(2,'0')}:${lastSlot.getMinutes().toString().padStart(2,'0')}`;
   const st = getSettings();
   const n = new Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
   n.on('click', () => {
     if (win) {
       try { if (win.isMinimized()) win.restore(); } catch {}
       try { win.show(); win.focus(); } catch {}
-      // Open prompt for earliest slot
-      win?.webContents.send('prompt:open', { slot: slotKey(digestQueue[0]) });
+      // Open prompt for earliest slot captured at notification creation time.
+      win?.webContents.send('prompt:open', { slot: slotKey(firstSlot) });
+      // Force open dialog even if slot was previously handled so user can re-log or review.
+      win?.webContents.send('dialog:open-log', { slot: slotKey(firstSlot) });
     }
   });
   n.show();
@@ -130,6 +150,8 @@ function notifyForSlot(slot: Date) {
       try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 400); } catch {}
       console.log('[main] notification click -> prompt:open', slotKey(slot));
       win?.webContents.send('prompt:open', { slot: slotKey(slot) });
+      // Also force dialog open regardless of prior handled state.
+      win?.webContents.send('dialog:open-log', { slot: slotKey(slot) });
     } else {
       console.warn('[main] notification clicked but window is null');
     }
@@ -171,7 +193,7 @@ function scheduleTicker() {
         const mm = `${prevStart.getMinutes()}`.padStart(2,'0');
         const alreadyLogged = getDayEntries(day).some(e => e.day === day && e.start === `${hh}:${mm}`);
         if (!alreadyLogged) {
-          if (!pending.has(key)) pending.add(key);
+          enqueuePending(key); // emits queue:updated
           try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch {}
           notifyForSlot(prevStart);
           if (sDyn.auto_focus_on_slot && win) {
@@ -210,6 +232,7 @@ function scheduleStaleCheck() {
           if (win) {
             try { win.show(); win.focus(); } catch {}
             win?.webContents.send('prompt:open', { slot: result.key });
+            win?.webContents.send('dialog:open-log', { slot: result.key });
           }
         });
         n.show();
@@ -235,8 +258,10 @@ function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boo
     const slotEnd = new Date(slot.getTime() + getSlotMinutes() * 60000);
     if (!includeFuture && slotEnd.getTime() > now.getTime()) break; // stop at first slot that hasn't ended
     const key = slotKey(slot);
-    if (!done.has(key)) pending.add(key);
+    if (!done.has(key)) enqueuePending(key, { silent: true });
   }
+  // Single emit after bulk rebuild
+  try { win?.webContents.send('queue:updated'); } catch {}
 }
 
 // Rebuild pending queue when settings change. By default only future (>= now) slots are queued
@@ -257,9 +282,9 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeF
     const key = slotKey(slot);
     if (existing.has(key)) continue; // already logged
     if (!includeFuture && slotEnd.getTime() > now.getTime()) break; // stop at first slot that hasn't ended
-    if (!doneOrLogged(key)) pending.add(key);
+    if (!doneOrLogged(key)) enqueuePending(key, { silent: true });
   }
-  win?.webContents.send('queue:updated');
+  try { win?.webContents.send('queue:updated'); } catch {}
   function doneOrLogged(key: string) { return existing.has(key); }
 }
 
@@ -267,6 +292,8 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeF
 console.log('[main] registering IPC handlers...');
 ipcMain.handle('db:get-day', (_e, day: string) => getDayEntries(day));
 ipcMain.handle('db:get-days', () => getDays());
+ipcMain.handle('db:get-external-logged', (_e, day: string) => ({ day, exported: getExternalLogged(day) }));
+ipcMain.handle('db:set-external-logged', (_e, day: string, exported: boolean) => setExternalLogged(day, exported));
 ipcMain.handle('db:save-entries', (_e, entries: any[]) => saveEntries(entries));
 ipcMain.handle('db:get-summary', (_e, day: string) => getSummary(day));
 ipcMain.handle('db:get-recent', (_e, limit?: number) =>
@@ -305,10 +332,7 @@ ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
     const now = new Date();
     const isToday = day === toLocalDateYMD(now);
     const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isWorkdayEnabled(slotDate);
-    if (shouldRequeue) {
-      pending.add(`${day}T${start}`);
-      win?.webContents.send('queue:updated');
-    }
+    if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
   } catch { /* ignore parse errors */ }
   return { ok: true, removed };
 });
@@ -340,9 +364,11 @@ ipcMain.handle(
       };
       if (!groupedByDay.has(day)) groupedByDay.set(day, []);
       groupedByDay.get(day)!.push(entry);
-      pending.delete(k);
+      if (pending.has(k)) pending.delete(k);
     });
     groupedByDay.forEach((list) => saveEntries(list));
+    // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
+    try { win?.webContents.send('queue:updated'); } catch {}
     // Update lastEntryEndTime for today
     try {
       const today = toLocalDateYMD(new Date());
@@ -371,6 +397,7 @@ ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
     win?.show();
     win?.focus();
     win?.webContents.send('prompt:open', { slot: slotKey(slot) });
+    win?.webContents.send('dialog:open-log', { slot: slotKey(slot) });
   });
   n.show();
   return { ok: true };
@@ -499,4 +526,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// Clear timers proactively on quit to avoid lingering handles (housekeeping hardening)
+app.on('before-quit', () => {
+  try { if (tickerHandle) clearTimeout(tickerHandle); } catch {}
+  try { if (staleCheckHandle) clearInterval(staleCheckHandle); } catch {}
+  tickerHandle = null; staleCheckHandle = null;
 });

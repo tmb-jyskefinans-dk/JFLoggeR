@@ -31,6 +31,8 @@ export class SummaryViewComponent implements AfterViewInit  {
   rows = computed<SummaryRow[]>(() => this.ipc.summary());
   totalSlots = computed(() => this.rows().reduce((a, r) => a + r.slots, 0));
   totalMinutes = computed(() => this.rows().reduce((a, r) => a + r.minutes, 0));
+  // External exported status for current day
+  exported = computed(() => this.ipc.dayExported().get(this.day()) ?? false);
   // Grouped totals by category
   // Category totals aggregated, but ordered by CATEGORY_GROUPS definition rather than by minutes
   categoryTotals = computed(() => {
@@ -175,6 +177,13 @@ export class SummaryViewComponent implements AfterViewInit  {
     this.router.navigate(['/summary', ymd]);
   }
   gotoToday() { this.gotoDay(this.todayYmd()); }
+
+  onToggleExported(ev: Event) {
+    const day = this.day();
+    if (!day) return;
+    const checked = (ev.target as HTMLInputElement).checked;
+    this.ipc.setDayExported(day, checked);
+  }
 
   // Keyboard shortcuts: ArrowLeft / ArrowRight for day nav, 't' for today
   onKeydown(ev: KeyboardEvent) {

@@ -6,6 +6,7 @@ const electron_1 = require("electron");
 const node_path_1 = tslib_1.__importDefault(require("node:path"));
 const db_1 = require("./db");
 const stale_1 = require("./stale");
+const db_2 = require("./db");
 const time_1 = require("./time");
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
@@ -24,6 +25,20 @@ let staleCheckHandle = null;
 let lastStaleNotifiedKey = null;
 let digestQueue = []; // slots accumulated while user away
 let lastEntryEndTime = null; // for stale detection heuristics
+// Centralized helper to add a slot key to the pending set and notify renderer.
+// Optionally suppress immediate event for bulk operations (caller emits once afterwards).
+function enqueuePending(key, opts = {}) {
+    if (!key)
+        return;
+    if (!pending.has(key))
+        pending.add(key);
+    if (!opts.silent) {
+        try {
+            win?.webContents.send('queue:updated');
+        }
+        catch { }
+    }
+}
 function createWindow() {
     win = new electron_1.BrowserWindow({
         width: 1380,
@@ -36,7 +51,10 @@ function createWindow() {
         webPreferences: {
             preload: node_path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
-            nodeIntegration: false
+            nodeIntegration: false,
+            // Ensure timers (notifications ticker, stale checks) continue firing with accurate cadence
+            // even when window is unfocused or minimized. This prevents delayed queue updates.
+            backgroundThrottling: false
         }
     });
     // Update to new branded AppUserModelID (must match package.json build.appId for notifications & taskbar grouping)
@@ -73,9 +91,16 @@ function updateTrayTooltip() {
 function showDigestNotification() {
     if (!digestQueue.length)
         return;
-    const first = digestQueue[0];
-    const last = digestQueue[digestQueue.length - 1];
-    const body = `${digestQueue.length} uloggede intervaller fra ${first.getHours().toString().padStart(2, '0')}:${first.getMinutes().toString().padStart(2, '0')} til ${last.getHours().toString().padStart(2, '0')}:${last.getMinutes().toString().padStart(2, '0')}`;
+    // Capture the earliest & latest slot BEFORE we clear the queue so the notification click handler
+    // can reference a stable value. Previously we referenced digestQueue[0] inside the click handler
+    // after digestQueue was cleared, causing slotKey(undefined) -> TypeError.
+    const firstSlot = digestQueue[0];
+    const lastSlot = digestQueue[digestQueue.length - 1];
+    if (!firstSlot || !lastSlot) {
+        digestQueue = [];
+        return;
+    }
+    const body = `${digestQueue.length} uloggede intervaller fra ${firstSlot.getHours().toString().padStart(2, '0')}:${firstSlot.getMinutes().toString().padStart(2, '0')} til ${lastSlot.getHours().toString().padStart(2, '0')}:${lastSlot.getMinutes().toString().padStart(2, '0')}`;
     const st = (0, db_1.getSettings)();
     const n = new electron_1.Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
     n.on('click', () => {
@@ -90,8 +115,10 @@ function showDigestNotification() {
                 win.focus();
             }
             catch { }
-            // Open prompt for earliest slot
-            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(digestQueue[0]) });
+            // Open prompt for earliest slot captured at notification creation time.
+            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(firstSlot) });
+            // Force open dialog even if slot was previously handled so user can re-log or review.
+            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(firstSlot) });
         }
     });
     n.show();
@@ -131,6 +158,8 @@ function notifyForSlot(slot) {
             catch { }
             console.log('[main] notification click -> prompt:open', (0, time_1.slotKey)(slot));
             win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
+            // Also force dialog open regardless of prior handled state.
+            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot) });
         }
         else {
             console.warn('[main] notification clicked but window is null');
@@ -187,8 +216,7 @@ function scheduleTicker() {
                 const mm = `${prevStart.getMinutes()}`.padStart(2, '0');
                 const alreadyLogged = (0, db_1.getDayEntries)(day).some(e => e.day === day && e.start === `${hh}:${mm}`);
                 if (!alreadyLogged) {
-                    if (!pending.has(key))
-                        pending.add(key);
+                    enqueuePending(key); // emits queue:updated
                     try {
                         console.log('[main] enqueue prevStart', key, 'pending size', pending.size);
                     }
@@ -246,7 +274,7 @@ function scheduleStaleCheck() {
             if (result && result.key !== lastStaleNotifiedKey) {
                 lastStaleNotifiedKey = result.key;
                 const hm = result.key.split('T')[1];
-                const body = `Interval fra ${hm} er over ${Math.round(result.ageMinutes)} min uden registrering. Overvej at splitte eller annotere.`;
+                const body = `Interval fra ${hm} er nu over ${Math.round(result.ageMinutes)} min uden registrering. Log tiden for at undgå at glemme den.`;
                 const n = new electron_1.Notification({ title: 'Overvokset interval', body, silent: !!st.notification_silent });
                 n.on('click', () => {
                     if (win) {
@@ -256,6 +284,7 @@ function scheduleStaleCheck() {
                         }
                         catch { }
                         win?.webContents.send('prompt:open', { slot: result.key });
+                        win?.webContents.send('dialog:open-log', { slot: result.key });
                     }
                 });
                 n.show();
@@ -283,8 +312,13 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
             break; // stop at first slot that hasn't ended
         const key = (0, time_1.slotKey)(slot);
         if (!done.has(key))
-            pending.add(key);
+            enqueuePending(key, { silent: true });
     }
+    // Single emit after bulk rebuild
+    try {
+        win?.webContents.send('queue:updated');
+    }
+    catch { }
 }
 // Rebuild pending queue when settings change. By default only future (>= now) slots are queued
 // to avoid flooding the user with historical prompts after a granularity change.
@@ -307,15 +341,20 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
         if (!includeFuture && slotEnd.getTime() > now.getTime())
             break; // stop at first slot that hasn't ended
         if (!doneOrLogged(key))
-            pending.add(key);
+            enqueuePending(key, { silent: true });
     }
-    win?.webContents.send('queue:updated');
+    try {
+        win?.webContents.send('queue:updated');
+    }
+    catch { }
     function doneOrLogged(key) { return existing.has(key); }
 }
 // IPC handlers
 console.log('[main] registering IPC handlers...');
 electron_1.ipcMain.handle('db:get-day', (_e, day) => (0, db_1.getDayEntries)(day));
 electron_1.ipcMain.handle('db:get-days', () => (0, db_1.getDays)());
+electron_1.ipcMain.handle('db:get-external-logged', (_e, day) => ({ day, exported: (0, db_2.getExternalLogged)(day) }));
+electron_1.ipcMain.handle('db:set-external-logged', (_e, day, exported) => (0, db_2.setExternalLogged)(day, exported));
 electron_1.ipcMain.handle('db:save-entries', (_e, entries) => (0, db_1.saveEntries)(entries));
 electron_1.ipcMain.handle('db:get-summary', (_e, day) => (0, db_1.getSummary)(day));
 electron_1.ipcMain.handle('db:get-recent', (_e, limit) => (0, db_1.getDistinctRecent)(limit ?? 20));
@@ -352,10 +391,8 @@ electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
         const now = new Date();
         const isToday = day === (0, time_1.toLocalDateYMD)(now);
         const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && (0, time_1.isWorkdayEnabled)(slotDate);
-        if (shouldRequeue) {
-            pending.add(`${day}T${start}`);
-            win?.webContents.send('queue:updated');
-        }
+        if (shouldRequeue)
+            enqueuePending(`${day}T${start}`); // emits queue:updated
     }
     catch { /* ignore parse errors */ }
     return { ok: true, removed };
@@ -379,9 +416,15 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
         if (!groupedByDay.has(day))
             groupedByDay.set(day, []);
         groupedByDay.get(day).push(entry);
-        pending.delete(k);
+        if (pending.has(k))
+            pending.delete(k);
     });
     groupedByDay.forEach((list) => (0, db_1.saveEntries)(list));
+    // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
+    try {
+        win?.webContents.send('queue:updated');
+    }
+    catch { }
     // Update lastEntryEndTime for today
     try {
         const today = (0, time_1.toLocalDateYMD)(new Date());
@@ -409,6 +452,7 @@ electron_1.ipcMain.handle('debug:notify', (_e, opts) => {
         win?.show();
         win?.focus();
         win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
+        win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot) });
     });
     n.show();
     return { ok: true };
@@ -576,5 +620,20 @@ electron_1.app.whenReady().then(() => {
 electron_1.app.on('window-all-closed', () => {
     if (process.platform !== 'darwin')
         electron_1.app.quit();
+});
+// Clear timers proactively on quit to avoid lingering handles (housekeeping hardening)
+electron_1.app.on('before-quit', () => {
+    try {
+        if (tickerHandle)
+            clearTimeout(tickerHandle);
+    }
+    catch { }
+    try {
+        if (staleCheckHandle)
+            clearInterval(staleCheckHandle);
+    }
+    catch { }
+    tickerHandle = null;
+    staleCheckHandle = null;
 });
 //# sourceMappingURL=main.js.map
