@@ -1,4 +1,5 @@
 import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Router } from '@angular/router';
 import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
 import { IpcService } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
@@ -12,6 +13,7 @@ import { FormsModule } from '@angular/forms';
 })
 export class ManualLogComponent {
   ipc = inject(IpcService);
+  private router = inject(Router);
 
   date = new Date().toISOString().slice(0,10);
   start = '08:00';
@@ -55,6 +57,10 @@ export class ManualLogComponent {
     // Refresh signals for the affected day so Today/Day/Summary views update instantly
     this.ipc.loadDay(this.date);
     this.description=''; this.category=''; this.andetDescription='';
+    // Navigate to summary view for the date with snackbar notification state
+    try {
+      this.router.navigate(['/summary', this.date], { state: { snackbar: 'Manuel registrering tilføjet' }});
+    } catch { /* navigation errors ignored */ }
   }
 
   applyPreset(v: string) {

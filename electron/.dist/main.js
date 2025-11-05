@@ -17,6 +17,61 @@ try {
     }
 }
 catch { /* ignore if module missing in dev */ }
+// Auto-update (GitHub releases). Only initialize when the app is packaged.
+// In dev (ts outDir .dist) update-electron-app tries to read a package.json next to main.js (electron/.dist/package.json)
+// which does not exist, causing ENOENT. Guard with app.isPackaged.
+try {
+    if (electron_1.app.isPackaged) {
+        // Initialize simplified auto-update helper (GitHub releases).
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require('update-electron-app')({
+        // updateInterval: '1 hour', // uncomment to poll periodically
+        });
+        // Hook into underlying electron-updater events to notify user.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { autoUpdater } = require('electron-updater');
+        autoUpdater.on('checking-for-update', () => console.log('[update] checking for update...'));
+        autoUpdater.on('update-available', (info) => {
+            console.log('[update] update available', info?.version);
+        });
+        autoUpdater.on('update-not-available', () => console.log('[update] no update available'));
+        autoUpdater.on('error', (err) => console.warn('[update] error', err));
+        autoUpdater.on('download-progress', (p) => {
+            try {
+                console.log('[update] download progress', Math.round(p.percent) + '%');
+            }
+            catch { }
+        });
+        autoUpdater.on('update-downloaded', (info) => {
+            console.log('[update] downloaded', info?.version);
+            try {
+                const n = new electron_1.Notification({
+                    title: 'Opdatering klar',
+                    body: `Version ${info?.version} er klar. Genstart for at installere nu.`,
+                    silent: !!(0, db_1.getSettings)().notification_silent
+                });
+                n.on('click', () => {
+                    try {
+                        autoUpdater.quitAndInstall();
+                    }
+                    catch { }
+                });
+                n.show();
+                // Also inform renderer in case it wants to surface a UI prompt.
+                win?.webContents.send('update:ready', { version: info?.version });
+            }
+            catch (notifyErr) {
+                console.warn('[update] notify failed', notifyErr);
+            }
+        });
+    }
+    else {
+        console.log('[main] skipping auto-update init (development environment)');
+    }
+}
+catch (e) {
+    console.warn('[main] auto-update init failed', e);
+}
 let win = null;
 let tray = null;
 const pending = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'

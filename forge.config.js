@@ -47,4 +47,16 @@ module.exports = {
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),
   ],
+  publishers: [
+    {
+      name: '@electron-forge/publisher-github',
+      config: {
+        repository: {
+          owner: 'tmb-jyskefinans-dk',
+          name: 'JFLoggeR'
+        },
+        prerelease: true
+      }
+    }
+  ]
 };

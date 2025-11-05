@@ -11,6 +11,6 @@
     "outDir": "./.dist",
     "sourceMap": true
   },
-  "include": ["./**/*.ts"],
+  "include": ["./**/*.ts", "./**/*.png"],
   "exclude": ["**/__tests__/**"]
 }

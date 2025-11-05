@@ -19,7 +19,6 @@ import { setExternalLogged, getExternalLogged } from './db';
 
 import {
   nextQuarter,
-  currentSlotStart,
   previousSlotStart,
   isWorkTime,
   isWorkdayEnabled,
@@ -39,6 +38,51 @@ try {
   }
 } catch { /* ignore if module missing in dev */ }
 
+// Auto-update (GitHub releases). Only initialize when the app is packaged.
+// In dev (ts outDir .dist) update-electron-app tries to read a package.json next to main.js (electron/.dist/package.json)
+// which does not exist, causing ENOENT. Guard with app.isPackaged.
+try {
+  if (app.isPackaged) {
+    // Initialize simplified auto-update helper (GitHub releases).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require('update-electron-app')({
+      // updateInterval: '1 hour', // uncomment to poll periodically
+    });
+    // Hook into underlying electron-updater events to notify user.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.on('checking-for-update', () => console.log('[update] checking for update...'));
+    autoUpdater.on('update-available', (info: any) => {
+      console.log('[update] update available', info?.version);
+    });
+    autoUpdater.on('update-not-available', () => console.log('[update] no update available'));
+    autoUpdater.on('error', (err: any) => console.warn('[update] error', err));
+    autoUpdater.on('download-progress', (p: any) => {
+      try { console.log('[update] download progress', Math.round(p.percent) + '%'); } catch { }
+    });
+    autoUpdater.on('update-downloaded', (info: any) => {
+      console.log('[update] downloaded', info?.version);
+      try {
+        const n = new Notification({
+          title: 'Opdatering klar',
+          body: `Version ${info?.version} er klar. Genstart for at installere nu.`,
+          silent: !!getSettings().notification_silent
+        });
+        n.on('click', () => {
+          try { autoUpdater.quitAndInstall(); } catch { }
+        });
+        n.show();
+        // Also inform renderer in case it wants to surface a UI prompt.
+        win?.webContents.send('update:ready', { version: info?.version });
+      } catch (notifyErr) { console.warn('[update] notify failed', notifyErr); }
+    });
+  } else {
+    console.log('[main] skipping auto-update init (development environment)');
+  }
+} catch (e) {
+  console.warn('[main] auto-update init failed', e);
+}
+
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 const pending: Set<string> = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
@@ -54,7 +98,7 @@ function enqueuePending(key: string, opts: { silent?: boolean } = {}) {
   if (!key) return;
   if (!pending.has(key)) pending.add(key);
   if (!opts.silent) {
-    try { win?.webContents.send('queue:updated'); } catch {}
+    try { win?.webContents.send('queue:updated'); } catch { }
   }
 }
 
@@ -102,8 +146,8 @@ function updateTrayTooltip() {
     if (!tray) return;
     const today = toLocalDateYMD(new Date());
     const summary = getSummary(today) as any[];
-    const top = summary.slice(0,3).map(s => `${s.category}: ${s.minutes}m`).join(' | ');
-    const total = summary.reduce((a,s)=> a + s.minutes, 0);
+    const top = summary.slice(0, 3).map(s => `${s.category}: ${s.minutes}m`).join(' | ');
+    const total = summary.reduce((a, s) => a + s.minutes, 0);
     tray.setToolTip(top ? `${today} • ${top} • Total: ${total}m` : `${today} • Ingen registreringer endnu`);
   } catch (e) { console.error('[main] updateTrayTooltip failed', e); }
 }
@@ -116,13 +160,13 @@ function showDigestNotification() {
   const firstSlot = digestQueue[0];
   const lastSlot = digestQueue[digestQueue.length - 1];
   if (!firstSlot || !lastSlot) { digestQueue = []; return; }
-  const body = `${digestQueue.length} uloggede intervaller fra ${firstSlot.getHours().toString().padStart(2,'0')}:${firstSlot.getMinutes().toString().padStart(2,'0')} til ${lastSlot.getHours().toString().padStart(2,'0')}:${lastSlot.getMinutes().toString().padStart(2,'0')}`;
+  const body = `${digestQueue.length} uloggede intervaller fra ${firstSlot.getHours().toString().padStart(2, '0')}:${firstSlot.getMinutes().toString().padStart(2, '0')} til ${lastSlot.getHours().toString().padStart(2, '0')}:${lastSlot.getMinutes().toString().padStart(2, '0')}`;
   const st = getSettings();
   const n = new Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
   n.on('click', () => {
     if (win) {
-      try { if (win.isMinimized()) win.restore(); } catch {}
-      try { win.show(); win.focus(); } catch {}
+      try { if (win.isMinimized()) win.restore(); } catch { }
+      try { win.show(); win.focus(); } catch { }
       // Open prompt for earliest slot captured at notification creation time.
       win?.webContents.send('prompt:open', { slot: slotKey(firstSlot) });
       // Force open dialog even if slot was previously handled so user can re-log or review.
@@ -144,10 +188,10 @@ function notifyForSlot(slot: Date) {
   const n = new Notification({ title: 'Tid til at registér tid', body, silent: !!st.notification_silent });
   n.on('click', () => {
     if (win) {
-      try { if (win.isMinimized()) win.restore(); } catch {}
-      try { win.show(); } catch {}
-      try { win.focus(); } catch {}
-      try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 400); } catch {}
+      try { if (win.isMinimized()) win.restore(); } catch { }
+      try { win.show(); } catch { }
+      try { win.focus(); } catch { }
+      try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 400); } catch { }
       console.log('[main] notification click -> prompt:open', slotKey(slot));
       win?.webContents.send('prompt:open', { slot: slotKey(slot) });
       // Also force dialog open regardless of prior handled state.
@@ -172,13 +216,13 @@ function notifyForSlot(slot: Date) {
 }
 
 function scheduleTicker() {
-  if (tickerHandle) { try { clearTimeout(tickerHandle); } catch {} tickerHandle = null; }
+  if (tickerHandle) { try { clearTimeout(tickerHandle); } catch { } tickerHandle = null; }
   const tick = () => {
     const boundary = new Date(); // This is the start of the NEW slot
     if (isWorkTime(boundary)) {
       const gran = getSlotMinutes();
       const prevStart = previousSlotStart(boundary); // Slot that just finished
-      try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, prevStart: slotKey(prevStart) }); } catch {}
+      try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, prevStart: slotKey(prevStart) }); } catch { }
       const sDyn = getSettings();
       const { h: dsh, m: dsm } = parseHM(sDyn.work_start);
       const { h: deh, m: dem } = parseHM(sDyn.work_end);
@@ -189,18 +233,18 @@ function scheduleTicker() {
         const key = slotKey(prevStart);
         // Guard against re-queueing already logged slot
         const day = toLocalDateYMD(prevStart);
-        const hh = `${prevStart.getHours()}`.padStart(2,'0');
-        const mm = `${prevStart.getMinutes()}`.padStart(2,'0');
+        const hh = `${prevStart.getHours()}`.padStart(2, '0');
+        const mm = `${prevStart.getMinutes()}`.padStart(2, '0');
         const alreadyLogged = getDayEntries(day).some(e => e.day === day && e.start === `${hh}:${mm}`);
         if (!alreadyLogged) {
           enqueuePending(key); // emits queue:updated
-          try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch {}
+          try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch { }
           notifyForSlot(prevStart);
           if (sDyn.auto_focus_on_slot && win) {
-            try { if (win.isMinimized()) win.restore(); } catch {}
-            try { win.show(); } catch {}
-            try { win.focus(); } catch {}
-            try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch {} }, 350); } catch {}
+            try { if (win.isMinimized()) win.restore(); } catch { }
+            try { win.show(); } catch { }
+            try { win.focus(); } catch { }
+            try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 350); } catch { }
             console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
             win?.webContents.send('prompt:open', { slot: key });
           }
@@ -218,7 +262,7 @@ function restartTickerIfWorkdayNow() {
 }
 
 function scheduleStaleCheck() {
-  if (staleCheckHandle) { try { clearInterval(staleCheckHandle); } catch {} }
+  if (staleCheckHandle) { try { clearInterval(staleCheckHandle); } catch { } }
   staleCheckHandle = setInterval(() => {
     try {
       const st = getSettings();
@@ -226,18 +270,18 @@ function scheduleStaleCheck() {
       if (result && result.key !== lastStaleNotifiedKey) {
         lastStaleNotifiedKey = result.key;
         const hm = result.key.split('T')[1];
-  const body = `Interval fra ${hm} er nu over ${Math.round(result.ageMinutes)} min uden registrering. Log tiden for at undgå at glemme den.`;
+        const body = `Interval fra ${hm} er nu over ${Math.round(result.ageMinutes)} min uden registrering. Log tiden for at undgå at glemme den.`;
         const n = new Notification({ title: 'Overvokset interval', body, silent: !!st.notification_silent });
         n.on('click', () => {
           if (win) {
-            try { win.show(); win.focus(); } catch {}
+            try { win.show(); win.focus(); } catch { }
             win?.webContents.send('prompt:open', { slot: result.key });
             win?.webContents.send('dialog:open-log', { slot: result.key });
           }
         });
         n.show();
       }
-    } catch {/* ignore */}
+    } catch {/* ignore */ }
   }, 60000);
 }
 
@@ -261,7 +305,7 @@ function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boo
     if (!done.has(key)) enqueuePending(key, { silent: true });
   }
   // Single emit after bulk rebuild
-  try { win?.webContents.send('queue:updated'); } catch {}
+  try { win?.webContents.send('queue:updated'); } catch { }
 }
 
 // Rebuild pending queue when settings change. By default only future (>= now) slots are queued
@@ -284,7 +328,7 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeF
     if (!includeFuture && slotEnd.getTime() > now.getTime()) break; // stop at first slot that hasn't ended
     if (!doneOrLogged(key)) enqueuePending(key, { silent: true });
   }
-  try { win?.webContents.send('queue:updated'); } catch {}
+  try { win?.webContents.send('queue:updated'); } catch { }
   function doneOrLogged(key: string) { return existing.has(key); }
 }
 
@@ -317,7 +361,7 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   // When enabling mid-workday we now WAIT until next boundary (end of current slot) instead of immediate catch-up.
   restartTickerIfWorkdayNow();
   // Apply auto-start setting (Windows/macOS)
-  try { app.setLoginItemSettings({ openAtLogin: !!after.auto_start_on_login }); } catch {}
+  try { app.setLoginItemSettings({ openAtLogin: !!after.auto_start_on_login }); } catch { }
   return { ok: true, settings: after };
 });
 
@@ -368,7 +412,7 @@ ipcMain.handle(
     });
     groupedByDay.forEach((list) => saveEntries(list));
     // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
-    try { win?.webContents.send('queue:updated'); } catch {}
+    try { win?.webContents.send('queue:updated'); } catch { }
     // Update lastEntryEndTime for today
     try {
       const today = toLocalDateYMD(new Date());
@@ -376,12 +420,12 @@ ipcMain.handle(
       if (todayEntries.length) {
         const last = todayEntries[todayEntries.length - 1];
         if (last?.end) {
-          const [hh,mm] = last.end.split(':').map(Number);
-          const [y,mo,d] = today.split('-').map(Number);
-          lastEntryEndTime = new Date(y,(mo||1)-1,d||1,hh,mm,0,0);
+          const [hh, mm] = last.end.split(':').map(Number);
+          const [y, mo, d] = today.split('-').map(Number);
+          lastEntryEndTime = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
         }
       }
-    } catch {}
+    } catch { }
     updateTrayTooltip();
     return { ok: true };
   }
@@ -421,7 +465,7 @@ app.whenReady().then(() => {
   try {
     const iconPath = path.join(__dirname, 'icon.png');
     let img: any;
-    try { img = nativeImage.createFromPath(iconPath); } catch {}
+    try { img = nativeImage.createFromPath(iconPath); } catch { }
     tray = new Tray(img && !img.isEmpty() ? img : nativeImage.createEmpty());
     updateTrayTooltip();
     // Provide a context menu so user can interact with the app from the tray
@@ -438,14 +482,14 @@ app.whenReady().then(() => {
                 win.show();
                 win.focus();
               }
-            } catch {}
+            } catch { }
           }
         },
         {
           label: 'Log nu',
           click: () => {
             if (!win) return;
-            try { win.show(); win.focus(); } catch {}
+            try { win.show(); win.focus(); } catch { }
             // Open prompt for the slot that just finished (previous slot) so user can log immediately.
             const prev = previousSlotStart(new Date());
             const key = slotKey(prev);
@@ -458,7 +502,7 @@ app.whenReady().then(() => {
           label: 'Log alle ventende',
           click: () => {
             if (!win) return;
-            try { win.show(); win.focus(); } catch {}
+            try { win.show(); win.focus(); } catch { }
             // Only open bulk dialog if there are pending slots
             if (pending.size > 0) {
               win?.webContents.send('dialog:open-log-all');
@@ -472,7 +516,7 @@ app.whenReady().then(() => {
           label: 'Gå til i dag',
           click: () => {
             if (!win) return;
-            try { win.show(); win.focus(); } catch {}
+            try { win.show(); win.focus(); } catch { }
             // Send explicit navigate event for today summary view
             const today = toLocalDateYMD(new Date());
             win?.webContents.send('navigate:today', { day: today });
@@ -481,7 +525,7 @@ app.whenReady().then(() => {
         { type: 'separator' },
         {
           label: 'Afslut',
-          click: () => { try { app.quit(); } catch {} }
+          click: () => { try { app.quit(); } catch { } }
         }
       ]);
       tray.setContextMenu(trayMenu);
@@ -495,12 +539,12 @@ app.whenReady().then(() => {
           } else {
             win.show(); win.focus();
           }
-        } catch {}
+        } catch { }
       });
     } catch (menuErr) { console.error('[main] tray menu init failed', menuErr); }
   } catch (e) { console.error('[main] tray init failed', e); }
   // Remove default application menu (we provide custom controls in renderer)
-  try { Menu.setApplicationMenu(null); } catch {}
+  try { Menu.setApplicationMenu(null); } catch { }
   console.log('[main] rebuilding backlog for today...');
   rebuildBacklogForToday({ includeFuture: false });
   console.log('[main] scheduling ticker for notifications...');
@@ -530,7 +574,7 @@ app.on('window-all-closed', () => {
 
 // Clear timers proactively on quit to avoid lingering handles (housekeeping hardening)
 app.on('before-quit', () => {
-  try { if (tickerHandle) clearTimeout(tickerHandle); } catch {}
-  try { if (staleCheckHandle) clearInterval(staleCheckHandle); } catch {}
+  try { if (tickerHandle) clearTimeout(tickerHandle); } catch { }
+  try { if (staleCheckHandle) clearInterval(staleCheckHandle); } catch { }
   tickerHandle = null; staleCheckHandle = null;
 });

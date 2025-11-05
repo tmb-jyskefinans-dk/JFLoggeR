@@ -201,6 +201,16 @@ export class SummaryViewComponent implements AfterViewInit  {
   }
 
   constructor() {
+    // Display snackbar message passed via navigation state (e.g. after manual registration)
+    try {
+      const nav = inject(Router).getCurrentNavigation();
+      const msg = nav?.extras?.state?.['snackbar'];
+      if (typeof msg === 'string' && msg.trim()) {
+        // Defer toast until after first data load so we don't conflict with initial day-change toast
+        this.initialized = true; // prevent day-change toast overriding manual registration confirmation
+        setTimeout(() => this.showToast(msg.trim()), 50);
+      }
+    } catch { }
     effect(() => {
       const d = this.day();
       if (!d) return;
