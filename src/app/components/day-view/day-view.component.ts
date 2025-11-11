@@ -23,6 +23,63 @@ export class DayViewComponent  {
   // Derived / mirrored signals from service
   entries = computed(() => this.ipc.dayEntries());
   days = computed(() => this.ipc.days());
+  settings = computed(() => this.ipc.settings());
+
+  /**
+   * Combined rows (real entries + missing placeholder intervals) sorted by start time.
+   * A placeholder row has shape { start: string; end: string; missing: true }.
+   */
+  rows = computed(() => {
+    const list = this.entries();
+    const s = this.settings();
+    const day = this.day();
+    if (!day || !s) return list;
+    const slotMinutes: number = Number(s.slot_minutes) || 15;
+    const workStart: string = s.work_start;
+    const workEnd: string = s.work_end;
+    if (!workStart || !workEnd) return list;
+    // Parse work window
+    const [wsh, wsm] = workStart.split(':').map(Number);
+    const [weh, wem] = workEnd.split(':').map(Number);
+    const startM = wsh * 60 + wsm;
+    const endM = weh * 60 + wem;
+    if (endM <= startM) return list;
+    // Build coverage set of slot start minutes covered by existing entries.
+    // Entry coverage: any slot whose start minute >= entry.start and < entry.end considered covered.
+    const covered = new Set<number>();
+    for (const e of list) {
+      if (!e.start || !e.end) continue;
+      const [sh, sm] = e.start.split(':').map(Number);
+      const [eh, em] = e.end.split(':').map(Number);
+      const es = sh * 60 + sm;
+      const ee = eh * 60 + em;
+      if (ee <= es) continue; // skip invalid
+      for (let m = es; m < ee; m += slotMinutes) {
+        if (m % slotMinutes === 0) covered.add(m);
+      }
+    }
+    // Current time filtering for today: only include missing slots that have ended already.
+    let nowLimitM = Infinity;
+    if (day === this.clock.today()) {
+      const now = new Date();
+      nowLimitM = now.getHours() * 60 + now.getMinutes();
+    }
+    const placeholders: any[] = [];
+    for (let m = startM; m < endM; m += slotMinutes) {
+      if (m >= nowLimitM) break; // don't show future intervals for current day
+      if (!covered.has(m)) {
+        const h = Math.floor(m / 60), mm = m % 60;
+        const start = `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+        const endMin = m + slotMinutes;
+        const eh = Math.floor(endMin / 60), emm = endMin % 60;
+        const end = `${String(eh).padStart(2,'0')}:${String(emm).padStart(2,'0')}`;
+        placeholders.push({ start, end, description: '', category: '', missing: true });
+      }
+    }
+    // Merge & sort
+    const merged = [...list, ...placeholders].sort((a:any,b:any)=> a.start.localeCompare(b.start));
+    return merged;
+  });
 
   // Ordered categories using same logic as summary (group declaration order then extras)
   orderedCategories = computed(() => {
@@ -81,6 +138,22 @@ export class DayViewComponent  {
   remove(e: any) {
     if (!e || !e.day || !e.start) return;
     this.ipc.deleteEntry(e.day, e.start);
+  }
+
+  /** Add a missing slot to the pending list & open the log dialog pre-selecting it. */
+  logMissing(start: string) {
+    const day = this.day();
+    if (!day || !start) return;
+    const slotKey = `${day}T${start}`;
+    // Ensure pendingSlots signal includes it so dialog can select it.
+    const current = this.ipc.pendingSlots();
+    if (!current.includes(slotKey)) this.ipc.pendingSlots.set([...current, slotKey].sort());
+    // Set prompt slot so LogDialog can auto-select it
+    try { this.ipc.lastPromptSlot.set(slotKey); } catch { /* ignore */ }
+    // Dispatch custom event listened by AppComponent to open dialog.
+    try {
+      window.dispatchEvent(new CustomEvent('open-log-dialog', { detail: { slot: slotKey } }));
+    } catch { /* ignore */ }
   }
 
   toggleExported(day: string, ev: Event) {

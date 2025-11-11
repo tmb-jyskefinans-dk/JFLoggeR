@@ -54,6 +54,15 @@ export class AppComponent {
         }
       });
     } catch { /* ignore */ }
+
+    // Listen for custom event dispatched by DayViewComponent to open dialog for a missing slot
+    window.addEventListener('open-log-dialog', (e: any) => {
+      const slot = e?.detail?.slot;
+      if (!this.dialogOpen()) this.dialogOpen.set(true); else {
+        if (slot && slot !== this.handledPromptSlot()) this.handledPromptSlot.set(slot);
+      }
+      if (slot && slot !== this.handledPromptSlot()) this.handledPromptSlot.set(slot);
+    });
   }
 
   openDialog() { this.dialogOpen.set(true); }

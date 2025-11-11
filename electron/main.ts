@@ -54,6 +54,19 @@ try {
     autoUpdater.on('checking-for-update', () => console.log('[update] checking for update...'));
     autoUpdater.on('update-available', (info: any) => {
       console.log('[update] update available', info?.version);
+
+      try {
+        const n = new Notification({
+          title: 'Ny opdatering klar',
+          body: `Version ${info?.version} er tilgængelig.`,
+          silent: !!getSettings().notification_silent
+        });
+        n.show();
+        // Also inform renderer in case it wants to surface a UI prompt.
+        win?.webContents.send('update:ready', { version: info?.version });
+      } catch (notifyErr) { console.warn('[update] update available notify failed', notifyErr); }
+
+
     });
     autoUpdater.on('update-not-available', () => console.log('[update] no update available'));
     autoUpdater.on('error', (err: any) => console.warn('[update] error', err));
