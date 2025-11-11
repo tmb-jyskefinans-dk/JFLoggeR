@@ -40,4 +40,7 @@ contextBridge.exposeInMainWorld('workApi', {
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
   onMaximizeState: (cb: (state: { maximized: boolean }) => void) => ipcRenderer.on('window:maximize-state', (_e, d) => cb(d))
+  ,
+  // Logging bridge
+  logWrite: (level: string, message: string, meta?: any) => ipcRenderer.invoke('log:write', { level, message, meta })
 });

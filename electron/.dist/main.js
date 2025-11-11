@@ -4,6 +4,44 @@ const tslib_1 = require("tslib");
 // electron/main.ts
 const electron_1 = require("electron");
 const node_path_1 = tslib_1.__importDefault(require("node:path"));
+const node_fs_1 = tslib_1.__importDefault(require("node:fs"));
+// Lightweight structured logging to file + console. Rotates by day (new file per day).
+function ensureLogDir() {
+    const dir = node_path_1.default.join(electron_1.app.getPath('userData'), 'logs');
+    try {
+        if (!node_fs_1.default.existsSync(dir))
+            node_fs_1.default.mkdirSync(dir, { recursive: true });
+    }
+    catch { /* ignore */ }
+    return dir;
+}
+function currentLogFile() {
+    const day = new Date().toISOString().slice(0, 10);
+    return node_path_1.default.join(ensureLogDir(), `app-${day}.log`);
+}
+function writeLog(level, message, meta) {
+    try {
+        const ts = new Date().toISOString();
+        const line = JSON.stringify({ ts, level, message, meta: meta ?? null });
+        // Console echo (condensed)
+        const prefix = `[${level}]`;
+        if (level === 'error')
+            console.error(prefix, message, meta ?? '');
+        else if (level === 'warn')
+            console.warn(prefix, message, meta ?? '');
+        else
+            console.log(prefix, message, meta ?? '');
+        node_fs_1.default.appendFile(currentLogFile(), line + '\n', () => { });
+    }
+    catch (e) { /* last-chance; avoid throwing in logger */ }
+}
+// Capture process-level failures early
+process.on('uncaughtException', (err) => {
+    writeLog('uncaughtException', err?.message || String(err), { stack: err?.stack });
+});
+process.on('unhandledRejection', (reason) => {
+    writeLog('unhandledRejection', typeof reason === 'string' ? reason : (reason?.message || 'promise rejection'), { reason });
+});
 const db_1 = require("./db");
 const stale_1 = require("./stale");
 const db_2 = require("./db");
@@ -475,6 +513,16 @@ electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
     }
     catch { /* ignore parse errors */ }
     return { ok: true, removed };
+});
+// Generic renderer -> main log sink
+electron_1.ipcMain.handle('log:write', (_e, entry) => {
+    try {
+        writeLog(entry.level || 'info', entry.message || '', entry.meta);
+        return { ok: true };
+    }
+    catch (e) {
+        return { ok: false, error: String(e) };
+    }
 });
 electron_1.ipcMain.handle('queue:get', () => Array.from(pending).sort());
 electron_1.ipcMain.handle('queue:submit', (_e, payload) => {

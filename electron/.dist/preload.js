@@ -36,6 +36,8 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     minimizeWindow: () => electron_1.ipcRenderer.invoke('window:minimize'),
     toggleMaximizeWindow: () => electron_1.ipcRenderer.invoke('window:toggle-maximize'),
     closeWindow: () => electron_1.ipcRenderer.invoke('window:close'),
-    onMaximizeState: (cb) => electron_1.ipcRenderer.on('window:maximize-state', (_e, d) => cb(d))
+    onMaximizeState: (cb) => electron_1.ipcRenderer.on('window:maximize-state', (_e, d) => cb(d)),
+    // Logging bridge
+    logWrite: (level, message, meta) => electron_1.ipcRenderer.invoke('log:write', { level, message, meta })
 });
 //# sourceMappingURL=preload.js.map

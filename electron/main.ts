@@ -1,6 +1,38 @@
 // electron/main.ts
 import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
+
+// Lightweight structured logging to file + console. Rotates by day (new file per day).
+function ensureLogDir(): string {
+  const dir = path.join(app.getPath('userData'), 'logs');
+  try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+  return dir;
+}
+function currentLogFile(): string {
+  const day = new Date().toISOString().slice(0,10);
+  return path.join(ensureLogDir(), `app-${day}.log`);
+}
+function writeLog(level: string, message: string, meta?: any) {
+  try {
+    const ts = new Date().toISOString();
+    const line = JSON.stringify({ ts, level, message, meta: meta ?? null });
+    // Console echo (condensed)
+    const prefix = `[${level}]`;
+    if (level === 'error') console.error(prefix, message, meta ?? '');
+    else if (level === 'warn') console.warn(prefix, message, meta ?? '');
+    else console.log(prefix, message, meta ?? '');
+    fs.appendFile(currentLogFile(), line + '\n', () => {/* ignore errors */});
+  } catch (e) { /* last-chance; avoid throwing in logger */ }
+}
+
+// Capture process-level failures early
+process.on('uncaughtException', (err) => {
+  writeLog('uncaughtException', err?.message || String(err), { stack: err?.stack });
+});
+process.on('unhandledRejection', (reason: any) => {
+  writeLog('unhandledRejection', typeof reason === 'string' ? reason : (reason?.message || 'promise rejection'), { reason });
+});
 
 import {
   initDb,
@@ -403,6 +435,11 @@ ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
     if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
   } catch { /* ignore parse errors */ }
   return { ok: true, removed };
+});
+
+// Generic renderer -> main log sink
+ipcMain.handle('log:write', (_e, entry: { level: string; message: string; meta?: any }) => {
+  try { writeLog(entry.level || 'info', entry.message || '', entry.meta); return { ok: true }; } catch (e) { return { ok: false, error: String(e) }; }
 });
 
 
