@@ -171,14 +171,15 @@ Manual logging popup features:
 
 You can import time segments from external tools by pasting one JSON object per line into the Import section of the Settings page.
 
-Format per line:
+Format per line (category now supported):
 
 ```
-{"entry_id":"ac2e...","task":"Task name","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15}
+{"entry_id":"ac2e...","task":"Task name","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15,"category":"Andet"}
 ```
 
 Rules & behavior:
-* `task` maps to `description`; category is set to `Import`.
+* `task` maps to `description`.
+* `category` (optional) maps directly; if omitted or blank falls back to `Import`.
 * Each record is expanded into whole slots of your current interval length (`slot_minutes`).
 * Partial leading/trailing fragments shorter than a full slot are ignored.
 * Intervals shorter than one slot are skipped.

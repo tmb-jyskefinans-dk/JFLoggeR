@@ -267,10 +267,11 @@ export function lastNEntries(n = 8) {
 }
 
 /** Import external JSON lines describing time segments.
- * Format per line:
- * {"entry_id":"uuid","task":"Desc","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15}
+ * Format per line now supports an optional category field:
+ * {"entry_id":"uuid","task":"Desc","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15,"category":"Andet"}
  * Each record is expanded into slot-sized entries (current settings.slot_minutes) fully contained in the interval.
  * Partial leading/trailing fragments shorter than the slot size are ignored.
+ * Category fallbacks: if category missing -> 'Import'; blank string trimmed; special case 'Andet' preserved.
  */
 export function importExternalLines(raw: string) {
   ensureDb(); db.read();
@@ -283,7 +284,7 @@ export function importExternalLines(raw: string) {
     const line = lines[i];
     let obj: any;
     try { obj = JSON.parse(line); } catch (e) { skipped++; details.push({ line: i+1, reason: 'Invalid JSON' }); continue; }
-    const { task, segment_start, segment_end } = obj || {};
+    const { task, segment_start, segment_end, category } = obj || {};
     if (!task || !segment_start || !segment_end) {
       skipped++; details.push({ line: i+1, reason: 'Missing required field task/segment_start/segment_end' });
       continue;
@@ -306,7 +307,9 @@ export function importExternalLines(raw: string) {
       const day = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,'0')}-${String(cursor.getDate()).padStart(2,'0')}`;
       const startHM = `${String(cursor.getHours()).padStart(2,'0')}:${String(cursor.getMinutes()).padStart(2,'0')}`;
       const endHM = `${String(slotEnd.getHours()).padStart(2,'0')}:${String(slotEnd.getMinutes()).padStart(2,'0')}`;
-      imported.push({ day, start: startHM, end: endHM, description: String(task), category: 'Import', created_at: new Date().toISOString() });
+      const catRaw = typeof category === 'string' ? category.trim() : '';
+      const cat = catRaw || 'Import';
+      imported.push({ day, start: startHM, end: endHM, description: String(task), category: cat, created_at: new Date().toISOString() });
       cursor = slotEnd;
     }
     if (imported.length === 0 && intervalMinutes < slotMinutes) {

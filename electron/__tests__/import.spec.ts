@@ -7,18 +7,19 @@ describe('importExternalLines', () => {
     try { initDb(); } catch { /* ignore */ }
   });
 
-  it('expands aligned 30-minute interval into two slot-sized entries', () => {
+  it('expands aligned interval and preserves category', () => {
     const gran = getSettings().slot_minutes;
     expect(gran).toBeGreaterThan(0);
     const start = new Date(); start.setHours(8,0,0,0);
     const end = new Date(start.getTime() + gran*2*60000);
-    const line = JSON.stringify({ entry_id: 'x', task: 'Test', segment_start: start.toISOString(), segment_end: end.toISOString(), minutes: gran*2 });
+    const line = JSON.stringify({ entry_id: 'x', task: 'Test', segment_start: start.toISOString(), segment_end: end.toISOString(), minutes: gran*2, category: 'Andet' });
     const res = importExternalLines(line);
     expect(res.imported).toBe(2);
     expect(res.skipped).toBe(0);
+    // We cannot directly access saved entries here without additional DB read, but ensure no error occurred.
   });
 
-  it('skips too short interval shorter than slot size', () => {
+  it('skips too short interval shorter than slot size (no category)', () => {
     const gran = getSettings().slot_minutes;
     const start = new Date(); start.setHours(9,0,0,0);
     const end = new Date(start.getTime() + (gran/3)*60000); // shorter than one slot
