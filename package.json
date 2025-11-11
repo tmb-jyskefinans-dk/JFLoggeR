@@ -1,6 +1,6 @@
 {
   "name": "work-logger",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Work Logger desktop app for tracking daily work activities",
   "author": "tmb-jyskefinans-dk",
   "main": "electron/.dist/main.js",
