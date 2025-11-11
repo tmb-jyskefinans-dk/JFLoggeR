@@ -135,6 +135,45 @@ If notifications don't appear on Windows:
 The Electron entry point is defined as `electron/main.js` (compiled from `electron/main.ts`). The production renderer assets resolve to `dist/work-logger/browser/index.html` which the main process loads when `VITE_DEV_SERVER_URL` is not set.
 
 ### Deleting a logged interval
+### Missing interval placeholders
+
+The Day view now highlights any past work slots inside your configured work hours that have not yet been logged. These appear with a reddish style and a "Log" action button. Clicking the button opens the log dialog pre‑selecting that specific slot, making it fast to fill gaps.
+
+Rules:
+* Only slots whose end time is in the past are shown (future intervals are not listed).
+* Placeholder rows are regenerated when settings (work hours / slot length) change or entries are added/removed.
+* Deleting an entry will recreate its slot as a placeholder if the slot is still within work hours and in the past.
+
+### Split log button & manual popup
+
+The header "Log nu" button is now a split button:
+* Left side: Opens the standard pending slots dialog.
+* Right caret: Opens a dropdown menu with choices:
+	* Log nu – same as left side.
+	* Manuel registrering – opens the Manual Log form in a popup dialog.
+
+Manual logging popup features:
+* Prefills the date with the currently viewed day (from /day/:ymd or /summary/:ymd routes) or today if not on a day route.
+* Supports keyboard shortcut Alt+M to open directly.
+* Dialog mode alters submit behavior: instead of navigating, it closes after successful save.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Alt+M    | Open manual registration popup prefilled with current day |
+
+### Testing helpers
+
+Pure helper functions are exported to facilitate Jest unit tests:
+* `computeMissingRows` – builds merged list of real + missing slots for a day.
+* `buildSlotKeys`, `filterNovelSlots`, `prefillDate`, `shouldEmitClosed` – manual log utilities.
+
+Run tests:
+```bash
+npm run test:unit
+```
+
 
 You can now delete an individual logged work slot from the Day view. Click the `×` button at the end of the row. If the deleted slot is in the past, it is re-added to the pending queue so you can re-log it with a different description/category. Deletion immediately refreshes the Day and Summary views.
 

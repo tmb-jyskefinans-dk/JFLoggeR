@@ -1,23 +1,28 @@
 import { Component, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { RouterLink, RouterOutlet } from '@angular/router';
+import { RouterLink, RouterOutlet, Router } from '@angular/router';
 import { WindowControlsComponent } from './components/window-controls/window-controls.component';
 import { IpcService } from './services/ipc.service';
 import { ClockService } from './services/clock.service';
 import { LogDialogComponent } from './components/log-dialog/log-dialog.component';
+import { ManualLogComponent } from './components/manual-log/manual-log.component';
 import { ThemeService } from './services/theme.service';
 
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, RouterOutlet, LogDialogComponent, WindowControlsComponent],
+  imports: [RouterLink, RouterOutlet, LogDialogComponent, ManualLogComponent, WindowControlsComponent],
   templateUrl: "./app.component.html",
   styleUrls: []
 })
 export class AppComponent {
   ipc = inject(IpcService);
   clock = inject(ClockService);
+  router = inject(Router);
   today = this.clock.today;
   dialogOpen = signal(false);
+  manualDialogOpen = signal(false);
+  menuOpen = signal(false);
+  manualDialogDate = signal<string>('');
   pendingCount = signal(0);
   // Track which prompt slot has already triggered an auto-open to avoid reopening immediately after close
   handledPromptSlot = signal<string|null>(null);
@@ -63,7 +68,37 @@ export class AppComponent {
       }
       if (slot && slot !== this.handledPromptSlot()) this.handledPromptSlot.set(slot);
     });
+
+    // Keyboard shortcut Alt+M opens manual log dialog prefilled with viewed day
+    window.addEventListener('keydown', (ev: KeyboardEvent) => {
+      if (ev.altKey && ev.key.toLowerCase() === 'm') {
+        ev.preventDefault();
+        this.openManualWithDate();
+      }
+    });
+
+    // Outside click closes the split-button dropdown menu
+    window.addEventListener('pointerdown', (ev: PointerEvent) => {
+      if (!this.menuOpen()) return;
+      const menuRoot = document.querySelector('[data-menu-root]');
+      if (menuRoot && !menuRoot.contains(ev.target as Node)) {
+        this.closeMenu();
+      }
+    });
   }
 
   openDialog() { this.dialogOpen.set(true); }
+  openManualDialog() { this.manualDialogOpen.set(true); }
+  toggleMenu() { this.menuOpen.update(v => !v); }
+  closeMenu() { this.menuOpen.set(false); }
+  private getCurrentDay(): string {
+    const url = this.router.url || '';
+    const m = url.match(/\/(day|summary)\/(\d{4}-\d{2}-\d{2})/);
+    return m ? m[2] : this.clock.today();
+  }
+  openManualWithDate() {
+    this.manualDialogDate.set(this.getCurrentDay());
+    this.openManualDialog();
+    this.closeMenu();
+  }
 }

@@ -169,3 +169,38 @@ export class DayViewComponent  {
     this.ipc.setDayExported(day, !current);
   }
 }
+
+// Pure helper used for tests (reuses logic above without signals)
+export function computeMissingRows(entries: { start:string; end:string; description?:string; category?:string }[], settings: { work_start:string; work_end:string; slot_minutes:number }, day: string, now: Date): any[] {
+  if (!day || !settings) return entries;
+  const slotMinutes = Number(settings.slot_minutes) || 15;
+  const [wsh,wsm] = settings.work_start.split(':').map(Number);
+  const [weh,wem] = settings.work_end.split(':').map(Number);
+  const startM = wsh*60+wsm, endM = weh*60+wem;
+  if (endM <= startM) return entries;
+  const covered = new Set<number>();
+  for (const e of entries) {
+    if (!e.start || !e.end) continue;
+    const [sh,sm] = e.start.split(':').map(Number);
+    const [eh,em] = e.end.split(':').map(Number);
+    const es = sh*60+sm, ee = eh*60+em;
+    if (ee <= es) continue;
+    for (let m = es; m < ee; m += slotMinutes) if (m % slotMinutes === 0) covered.add(m);
+  }
+  let nowLimitM = Infinity;
+  const ymdNow = now.toISOString().slice(0,10);
+  if (day === ymdNow) nowLimitM = now.getHours()*60 + now.getMinutes();
+  const placeholders: any[] = [];
+  for (let m = startM; m < endM; m += slotMinutes) {
+    if (m >= nowLimitM) break;
+    if (!covered.has(m)) {
+      const h = Math.floor(m/60), mm = m%60;
+      const start = `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+      const endMin = m + slotMinutes;
+      const eh = Math.floor(endMin/60), emm = endMin%60;
+      const end = `${String(eh).padStart(2,'0')}:${String(emm).padStart(2,'0')}`;
+      placeholders.push({ start, end, description:'', category:'', missing:true });
+    }
+  }
+  return [...entries, ...placeholders].sort((a:any,b:any)=> a.start.localeCompare(b.start));
+}

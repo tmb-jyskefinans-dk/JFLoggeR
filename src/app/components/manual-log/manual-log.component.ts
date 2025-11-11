@@ -1,4 +1,4 @@
-import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy, input, output, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
 import { IpcService } from '../../services/ipc.service';
@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
   templateUrl: './manual-log.component.html',
   styleUrls: ['./manual-log.component.scss']
 })
-export class ManualLogComponent {
+export class ManualLogComponent implements OnInit {
   ipc = inject(IpcService);
   private router = inject(Router);
 
@@ -30,6 +30,11 @@ export class ManualLogComponent {
     return !this.categoryGroups.some(g => g.items.includes(c));
   }
   error = signal('');
+
+  // Dialog integration: when rendered inside a modal overlay
+  dialogMode = input<boolean>(false);
+  closed = output<void>();
+  initialDate = input<string>('');
 
   async submit() {
     this.error.set('');
@@ -57,10 +62,23 @@ export class ManualLogComponent {
     // Refresh signals for the affected day so Today/Day/Summary views update instantly
     this.ipc.loadDay(this.date);
     this.description=''; this.category=''; this.andetDescription='';
-    // Navigate to summary view for the date with snackbar notification state
-    try {
-      this.router.navigate(['/summary', this.date], { state: { snackbar: 'Manuel registrering tilføjet' }});
-    } catch { /* navigation errors ignored */ }
+    if (!this.dialogMode()) {
+      // Page mode: navigate to summary view for the date with snackbar notification state
+      try {
+        this.router.navigate(['/summary', this.date], { state: { snackbar: 'Manuel registrering tilføjet' }});
+      } catch { /* navigation errors ignored */ }
+    } else {
+      // Dialog mode: simply close
+      this.closed.emit();
+    }
+  }
+
+  ngOnInit() {
+    // Prefill date if initialDate provided (dialog mode usage)
+    const d = this.initialDate();
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      this.date = d;
+    }
   }
 
   applyPreset(v: string) {
@@ -71,3 +89,30 @@ export class ManualLogComponent {
   }
 
 }
+
+// --- Pure helpers exported for test coverage without Angular DI complexity ---
+/** Build slot keys for a manual interval given start/end HH:MM inclusive of start and exclusive of end, aligned to slot length. */
+export function buildSlotKeys(date: string, start: string, end: string, slotMinutes: number): string[] {
+  const [sh,sm] = start.split(':').map(Number);
+  const [eh,em] = end.split(':').map(Number);
+  const startMin = sh*60+sm, endMin = eh*60+em;
+  if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin <= startMin || slotMinutes <= 0) return [];
+  const list: string[] = [];
+  const first = Math.floor(startMin/slotMinutes)*slotMinutes;
+  for (let m = first; m < endMin; m += slotMinutes) {
+    const h = Math.floor(m/60), mm = m%60;
+    list.push(`${date}T${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
+  }
+  return list;
+}
+/** Return only slots not present in existing day entry keys ("YYYY-MM-DDTHH:MM"). */
+export function filterNovelSlots(slotKeys: string[], existing: string[]): string[] {
+  const done = new Set(existing);
+  return slotKeys.filter(k => !done.has(k));
+}
+/** Prefill date logic used by component; returns validated date or fallback. */
+export function prefillDate(initialDate: string, fallback: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(initialDate) ? initialDate : fallback;
+}
+/** Decide whether submit should emit closed (dialog mode) or navigate (page mode). */
+export function shouldEmitClosed(dialogMode: boolean): boolean { return !!dialogMode; }
