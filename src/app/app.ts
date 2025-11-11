@@ -71,9 +71,33 @@ export class AppComponent {
 
     // Keyboard shortcut Alt+M opens manual log dialog prefilled with viewed day
     window.addEventListener('keydown', (ev: KeyboardEvent) => {
-      if (ev.altKey && ev.key.toLowerCase() === 'm') {
-        ev.preventDefault();
-        this.openManualWithDate();
+      // Ignore if focused inside editable elements
+      const target = ev.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (!ev.altKey) return;
+      const key = ev.key.toLowerCase();
+      switch (key) {
+        case 'm': // manual log popup
+          ev.preventDefault();
+          this.openManualWithDate();
+          break;
+        case 'l': // log now (open pending slots dialog)
+          ev.preventDefault();
+          this.openDialog();
+          this.closeMenu();
+          break;
+        case 's': // summary view for current day
+          ev.preventDefault();
+          this.router.navigate(['/summary', this.getCurrentDay()]);
+          break;
+        case 't': // today view
+          ev.preventDefault();
+          this.router.navigate(['/today']);
+          break;
+        case 'i': // settings (Indstillinger)
+          ev.preventDefault();
+          this.router.navigate(['/settings']);
+          break;
       }
     });
 

@@ -4,9 +4,9 @@
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
   <h1 class="text-lg md:text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">JF LoggR</h1>
     <nav class="flex gap-2 text-xs md:text-sm font-medium">
-  <a routerLink="/today" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">I dag</a>
-  <a [routerLink]="['/summary', today()]" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">Opsummering</a>
-  <a routerLink="/settings" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">Indstillinger</a>
+  <a routerLink="/today" title="Gå til I dag (Alt+T)" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">I dag</a>
+  <a [routerLink]="['/summary', today()]" title="Opsummering for i dag (Alt+S)" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">Opsummering</a>
+  <a routerLink="/settings" title="Åbn indstillinger (Alt+I)" class="inline-flex items-center px-3 h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">Indstillinger</a>
       </nav>
       <div class="ml-auto flex items-center gap-3">
         @if(pendingCount() > 0) {
@@ -20,7 +20,7 @@
           </button>
           <button (click)="toggleMenu()" [attr.aria-expanded]="menuOpen()" aria-haspopup="menu"
             class="inline-flex items-center justify-center rounded-r-md text-sm font-semibold px-2 h-9 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40 transition border-l border-indigo-500/40"
-            aria-label="Flere log muligheder">
+            aria-label="Flere log muligheder (Log nu Alt+L, Manuel registrering Alt+M)">
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg>
           </button>
           @if(menuOpen()) {

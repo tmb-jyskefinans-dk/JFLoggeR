@@ -162,6 +162,10 @@ Manual logging popup features:
 | Shortcut | Action |
 |----------|--------|
 | Alt+M    | Open manual registration popup prefilled with current day |
+| Alt+L    | Open "Log nu" dialog for pending intervals |
+| Alt+S    | Navigate to summary view for current day |
+| Alt+T    | Navigate to today day view |
+| Alt+I    | Open settings (Indstillinger) |
 
 ### Testing helpers
 
