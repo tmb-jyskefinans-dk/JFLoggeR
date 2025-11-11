@@ -94,9 +94,21 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     this.selectedSlots.set(next);
   }
   applyPreset(v: string) {
+    if (!v) return;
     const [desc, cat] = v.split('||');
-    if (desc) this.description = desc;
-    if (cat) this.category = cat;
+    // If preset category is 'Andet', route description into andetDescription field
+    if (cat === 'Andet') {
+      this.category = 'Andet';
+      if (desc) {
+        this.andetDescription = desc;
+        this.description = ''; // clear primary description to avoid stale content
+      }
+    } else {
+      if (desc) this.description = desc;
+      if (cat) this.category = cat;
+      // Clear special field when leaving 'Andet'
+      if (this.category !== 'Andet') this.andetDescription = '';
+    }
   }
   async submit() {
     const slots = this.selectedSlots();

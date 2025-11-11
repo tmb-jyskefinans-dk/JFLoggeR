@@ -84,8 +84,17 @@ export class ManualLogComponent implements OnInit {
   applyPreset(v: string) {
     if (!v) return;
     const [desc, cat] = v.split('||');
-    if (desc) this.description = desc;
-  if (cat) this.category = cat;
+    if (cat === 'Andet') {
+      this.category = 'Andet';
+      if (desc) {
+        this.andetDescription = desc;
+        this.description = '';
+      }
+    } else {
+      if (desc) this.description = desc;
+      if (cat) this.category = cat;
+      if (this.category !== 'Andet') this.andetDescription = '';
+    }
   }
 
 }
