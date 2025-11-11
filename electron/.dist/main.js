@@ -424,6 +424,17 @@ electron_1.ipcMain.handle('db:get-days', () => (0, db_1.getDays)());
 electron_1.ipcMain.handle('db:get-external-logged', (_e, day) => ({ day, exported: (0, db_2.getExternalLogged)(day) }));
 electron_1.ipcMain.handle('db:set-external-logged', (_e, day, exported) => (0, db_2.setExternalLogged)(day, exported));
 electron_1.ipcMain.handle('db:save-entries', (_e, entries) => (0, db_1.saveEntries)(entries));
+electron_1.ipcMain.handle('db:import-external', (_e, raw) => {
+    try {
+        const result = (0, db_1.importExternalLines)(String(raw ?? ''));
+        // After import refresh pending/backlog since newly added slots should not remain pending.
+        rebuildBacklogForToday({ includeFuture: false });
+        return { ok: true, ...result };
+    }
+    catch (e) {
+        return { ok: false, error: String(e) };
+    }
+});
 electron_1.ipcMain.handle('db:get-summary', (_e, day) => (0, db_1.getSummary)(day));
 electron_1.ipcMain.handle('db:get-recent', (_e, limit) => (0, db_1.getDistinctRecent)(limit ?? 20));
 electron_1.ipcMain.handle('db:get-recent-today', (_e, limit) => (0, db_1.getDistinctRecentToday)(limit ?? 20));

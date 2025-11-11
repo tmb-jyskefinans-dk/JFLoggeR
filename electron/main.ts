@@ -12,7 +12,8 @@ import {
   getDistinctRecentToday,
   getSettings,
   saveSettings,
-  deleteEntry
+  deleteEntry,
+  importExternalLines
 } from './db';
 import { computeStaleSlot } from './stale';
 import { setExternalLogged, getExternalLogged } from './db';
@@ -352,6 +353,16 @@ ipcMain.handle('db:get-days', () => getDays());
 ipcMain.handle('db:get-external-logged', (_e, day: string) => ({ day, exported: getExternalLogged(day) }));
 ipcMain.handle('db:set-external-logged', (_e, day: string, exported: boolean) => setExternalLogged(day, exported));
 ipcMain.handle('db:save-entries', (_e, entries: any[]) => saveEntries(entries));
+ipcMain.handle('db:import-external', (_e, raw: string) => {
+  try {
+    const result = importExternalLines(String(raw ?? ''));
+    // After import refresh pending/backlog since newly added slots should not remain pending.
+    rebuildBacklogForToday({ includeFuture: false });
+    return { ok: true, ...result };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
 ipcMain.handle('db:get-summary', (_e, day: string) => getSummary(day));
 ipcMain.handle('db:get-recent', (_e, limit?: number) =>
   getDistinctRecent(limit ?? 20)

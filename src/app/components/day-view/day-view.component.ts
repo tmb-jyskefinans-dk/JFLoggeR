@@ -20,6 +20,73 @@ export class DayViewComponent  {
   // Source signals
   day = signal<string>('');
 
+  // Category edit state
+  editingKey = signal<string|null>(null);
+  menuX = signal<number>(0);
+  menuY = signal<number>(0);
+  menuFlip = signal<boolean>(false);
+  allCategories = computed(() => {
+    // Collect from declared groups plus any ad-hoc categories present in entries and the default 'Import'
+    const fromGroups: string[] = CATEGORY_GROUPS.flatMap(g => g.items);
+    const present = new Set(this.entries().map(e => e.category).filter(c => !!c));
+    const extras: string[] = [];
+    for (const c of present) if (!fromGroups.includes(c)) extras.push(c);
+    if (!present.has('Import')) extras.push('Import');
+    return [...fromGroups, ...extras].filter((v,i,arr)=> arr.indexOf(v)===i);
+  });
+
+  // Grouped categories for selector (root groups + Øvrige for ad-hoc/import)
+  menuCategoryGroups = computed(() => {
+    const present = new Set(this.entries().map(e => e.category).filter(Boolean));
+    const groups = CATEGORY_GROUPS.map(g => ({ label: g.label, items: [...g.items] }));
+    const known = new Set(CATEGORY_GROUPS.flatMap(g => g.items));
+    const extras: string[] = [];
+    for (const cat of present) if (!known.has(cat)) extras.push(cat);
+    if (!known.has('Import')) extras.push('Import');
+    const dedupExtras = extras.filter((v,i,a)=> a.indexOf(v)===i).sort((a,b)=> a.localeCompare(b));
+    if (dedupExtras.length) groups.push({ label: 'Øvrige', items: dedupExtras });
+    return groups;
+  });
+
+  beginEdit(row: any, ev?: Event) {
+    if (!row || row.missing) return;
+    const key = `${row.day}T${row.start}`;
+    this.editingKey.set(key);
+    // Compute viewport position for dropdown to avoid scroll container clipping
+    if (ev && ev.target) {
+      const el = (ev.target as HTMLElement).closest('td') || (ev.target as HTMLElement);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        // Position below cell; adjust if near bottom later if needed
+        const margin = 8; // space between cell and menu
+        const menuHeightEstimate = 260; // rough average height; will adjust flip if insufficient space
+        const viewportH = window.innerHeight || document.documentElement.clientHeight || 800;
+        const wouldOverflow = rect.bottom + margin + menuHeightEstimate > viewportH;
+        this.menuFlip.set(wouldOverflow);
+        this.menuX.set(rect.left);
+        if (wouldOverflow) {
+          // Render above: position top at (rect.top - menuHeightEstimate) but keep within viewport
+          let y = rect.top - margin - menuHeightEstimate;
+          if (y < 0) y = 4; // clamp
+          this.menuY.set(y);
+        } else {
+          this.menuY.set(rect.bottom + margin);
+        }
+      }
+    }
+  }
+  cancelEdit() { this.editingKey.set(null); }
+  isEditing(row: any) { return !!row && !row.missing && this.editingKey() === `${row.day}T${row.start}`; }
+  applyCategory(row: any, cat: string) {
+    if (!row || row.missing || !cat) return;
+    const entry = { day: row.day, start: row.start, end: row.end, description: row.description, category: cat };
+    try { (window as any).workApi.saveEntries([entry]); } catch { }
+    // Refresh signals
+    this.ipc.loadDay(this.day());
+    this.ipc.refreshDays();
+    this.editingKey.set(null);
+  }
+
   // Derived / mirrored signals from service
   entries = computed(() => this.ipc.dayEntries());
   days = computed(() => this.ipc.days());
@@ -132,7 +199,13 @@ export class DayViewComponent  {
 
   // Initial days fetch (service already refreshes days in ctor, but this ensures up-to-date after first render)
   constructor() {
-    this.ipc.getDays().then(list => { /* service will set its signal; no manual set needed */ });
+    this.ipc.getDays().then(() => {});
+    // Close category menu on outside click
+    window.addEventListener('pointerdown', (ev: PointerEvent) => {
+      if (!this.editingKey()) return;
+      const menu = document.querySelector('[data-cat-menu]');
+      if (menu && !menu.contains(ev.target as Node)) this.cancelEdit();
+    });
   }
 
   remove(e: any) {

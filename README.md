@@ -167,6 +167,28 @@ Manual logging popup features:
 | Alt+T    | Navigate to today day view |
 | Alt+I    | Open settings (Indstillinger) |
 
+### Importing external entries
+
+You can import time segments from external tools by pasting one JSON object per line into the Import section of the Settings page.
+
+Format per line:
+
+```
+{"entry_id":"ac2e...","task":"Task name","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15}
+```
+
+Rules & behavior:
+* `task` maps to `description`; category is set to `Import`.
+* Each record is expanded into whole slots of your current interval length (`slot_minutes`).
+* Partial leading/trailing fragments shorter than a full slot are ignored.
+* Intervals shorter than one slot are skipped.
+* Non‑JSON lines or lines missing required fields are skipped and reported.
+* After import the pending queue is rebuilt so imported past slots are no longer shown as missing.
+
+Limitations:
+* Start/end times are floored to slot boundaries — if your source system logs arbitrary minutes, the first slot may start earlier than the original start time.
+* Remainder minutes < slot size are dropped (e.g. 62 minutes with 15‑minute slots imports as 4 slots = 60 minutes).
+
 ### Testing helpers
 
 Pure helper functions are exported to facilitate Jest unit tests:

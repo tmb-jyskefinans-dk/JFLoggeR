@@ -27,6 +27,7 @@ declare global {
   onMaximizeState?(cb: (s: { maximized: boolean }) => void): void;
   getExternalLogged?(day: string): Promise<{ day: string; exported: boolean }>;
   setExternalLogged?(day: string, exported: boolean): Promise<{ day: string; exported: boolean }>;
+      importExternal?(raw: string): Promise<{ ok: boolean; imported?: number; skipped?: number; details?: { line: number; reason: string }[]; error?: string }>;
     }
   }
 }
@@ -184,5 +185,21 @@ export class IpcService {
         this.refreshDays();
       })
       .catch(err => console.error('[ipc] setDayExported failed', err));
+  }
+
+  importExternal(raw: string) {
+    if (!window.workApi.importExternal) return Promise.resolve({ ok: false, error: 'Not supported' });
+    return window.workApi.importExternal(raw).then(r => {
+      // Refresh days & current day entries after import
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = String(today.getMonth()+1).padStart(2,'0');
+      const d = String(today.getDate()).padStart(2,'0');
+      const day = `${y}-${m}-${d}`;
+      this.loadDay(day);
+      this.refreshDays();
+      this.loadPending();
+      return r;
+    });
   }
 }

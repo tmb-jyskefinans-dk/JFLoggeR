@@ -26,6 +26,11 @@ export class SettingsComponent {
   autoStartOnLogin = signal<boolean>(false);
   groupNotifications = signal<boolean>(true);
 
+  // Import feature signals
+  importText = signal<string>('');
+  importResult = signal<{ ok: boolean; imported?: number; skipped?: number; details?: { line: number; reason: string }[]; error?: string }|null>(null);
+  importing = signal<boolean>(false);
+
   days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   initialSettings = signal<any|null>(null);
 
@@ -108,4 +113,16 @@ export class SettingsComponent {
       return copy;
     });
   }
+
+  performImport() {
+    const raw = this.importText().trim();
+    if (!raw) return;
+    this.importing.set(true);
+    this.ipc.importExternal(raw)
+      .then(res => this.importResult.set(res))
+      .catch(err => this.importResult.set({ ok: false, error: String(err) }))
+      .finally(() => this.importing.set(false));
+  }
+
+  clearImport() { this.importText.set(''); this.importResult.set(null); }
 }

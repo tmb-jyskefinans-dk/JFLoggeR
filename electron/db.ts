@@ -265,3 +265,58 @@ export function lastNEntries(n = 8) {
     .sort((a,b)=> (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     .slice(0, n);
 }
+
+/** Import external JSON lines describing time segments.
+ * Format per line:
+ * {"entry_id":"uuid","task":"Desc","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15}
+ * Each record is expanded into slot-sized entries (current settings.slot_minutes) fully contained in the interval.
+ * Partial leading/trailing fragments shorter than the slot size are ignored.
+ */
+export function importExternalLines(raw: string) {
+  ensureDb(); db.read();
+  const slotMinutes = getSettings().slot_minutes; // dynamic granularity
+  const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
+  const imported: Entry[] = [];
+  const details: { line: number; reason: string }[] = [];
+  let skipped = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let obj: any;
+    try { obj = JSON.parse(line); } catch (e) { skipped++; details.push({ line: i+1, reason: 'Invalid JSON' }); continue; }
+    const { task, segment_start, segment_end } = obj || {};
+    if (!task || !segment_start || !segment_end) {
+      skipped++; details.push({ line: i+1, reason: 'Missing required field task/segment_start/segment_end' });
+      continue;
+    }
+    let startDate: Date, endDate: Date;
+    try { startDate = new Date(segment_start); endDate = new Date(segment_end); } catch { skipped++; details.push({ line: i+1, reason: 'Invalid date format' }); continue; }
+    if (!(startDate instanceof Date) || isNaN(startDate.getTime()) || !(endDate instanceof Date) || isNaN(endDate.getTime())) {
+      skipped++; details.push({ line: i+1, reason: 'Unparseable dates' }); continue;
+    }
+    if (endDate <= startDate) { skipped++; details.push({ line: i+1, reason: 'End before start' }); continue; }
+    // Expand into slot-sized entries fully contained in interval
+    const intervalMinutes = (endDate.getTime() - startDate.getTime()) / 60000;
+    // Floor first slot start to boundary
+    const first = new Date(startDate);
+    const boundaryMinutes = Math.floor(first.getMinutes() / slotMinutes) * slotMinutes;
+    first.setMinutes(boundaryMinutes, 0, 0);
+    for (let cursor = first; cursor < endDate; ) {
+      const slotEnd = new Date(cursor.getTime() + slotMinutes * 60000);
+      if (slotEnd > endDate) break; // only include fully-covered slots
+      const day = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,'0')}-${String(cursor.getDate()).padStart(2,'0')}`;
+      const startHM = `${String(cursor.getHours()).padStart(2,'0')}:${String(cursor.getMinutes()).padStart(2,'0')}`;
+      const endHM = `${String(slotEnd.getHours()).padStart(2,'0')}:${String(slotEnd.getMinutes()).padStart(2,'0')}`;
+      imported.push({ day, start: startHM, end: endHM, description: String(task), category: 'Import', created_at: new Date().toISOString() });
+      cursor = slotEnd;
+    }
+    if (imported.length === 0 && intervalMinutes < slotMinutes) {
+      // Too small interval < slot granularity
+      details.push({ line: i+1, reason: 'Interval shorter than slot granularity – ignored' });
+      skipped++;
+    }
+  }
+  if (imported.length) {
+    saveEntries(imported);
+  }
+  return { imported: imported.length, skipped, details };
+}
