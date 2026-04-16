@@ -146,8 +146,12 @@ export class IpcService {
         else this.loadSettings();
         // Refresh pending slots after settings change (interval/hours may alter backlog)
         this.loadPending();
+        return resp;
       })
-      .catch(err => console.error('[ipc] saveSettings failed', err));
+      .catch(err => {
+        console.error('[ipc] saveSettings failed', err);
+        throw err;
+      });
   }
 
 

@@ -420,6 +420,9 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
         if (!done.has(key))
             enqueuePending(key, { silent: true });
     }
+    // Also include the currently running slot so users can log immediately
+    // when they start early or mid-slot while the app is running.
+    includeCurrentRunningSlot(now, done);
     // Single emit after bulk rebuild
     try {
         win?.webContents.send('queue:updated');
@@ -449,11 +452,30 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
         if (!doneOrLogged(key))
             enqueuePending(key, { silent: true });
     }
+    includeCurrentRunningSlot(now, existing);
     try {
         win?.webContents.send('queue:updated');
     }
     catch { }
     function doneOrLogged(key) { return existing.has(key); }
+}
+function includeCurrentRunningSlot(now, existing) {
+    if (!(0, time_1.isWorkdayEnabled)(now))
+        return;
+    const settings = (0, db_1.getSettings)();
+    if (settings.include_active_slot === false)
+        return;
+    const { h: endH, m: endM } = (0, time_1.parseHM)(settings.work_end);
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const endMinutes = endH * 60 + endM;
+    // Keep the "normal day" end boundary; only expand start flexibility.
+    if (nowMinutes >= endMinutes)
+        return;
+    const start = (0, time_1.currentSlotStart)(now);
+    const key = (0, time_1.slotKey)(start);
+    if (existing.has(key) || pending.has(key))
+        return;
+    enqueuePending(key, { silent: true });
 }
 // IPC handlers
 console.log('[main] registering IPC handlers...');
@@ -524,28 +546,49 @@ electron_1.ipcMain.handle('log:write', (_e, entry) => {
         return { ok: false, error: String(e) };
     }
 });
-electron_1.ipcMain.handle('queue:get', () => Array.from(pending).sort());
+electron_1.ipcMain.handle('queue:get', () => {
+    const now = new Date();
+    const day = (0, time_1.toLocalDateYMD)(now);
+    const existing = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
+    includeCurrentRunningSlot(now, existing);
+    return Array.from(pending).sort();
+});
 electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
+    if (!payload || !Array.isArray(payload.slots))
+        return { ok: false, error: 'Invalid payload' };
+    const description = String(payload.description ?? '').trim();
+    const category = String(payload.category ?? '').trim();
+    if (!description || !category)
+        return { ok: false, error: 'Description and category are required' };
     const groupedByDay = new Map();
-    payload.slots.forEach((k) => {
+    for (const k of payload.slots) {
+        if (typeof k !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(k)) {
+            return { ok: false, error: `Invalid slot key: ${String(k)}` };
+        }
         const [day, hm] = k.split('T');
         const [h, m] = hm.split(':');
+        const hh = Number(h);
+        const mm = Number(m);
+        if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+            return { ok: false, error: `Invalid slot time: ${k}` };
+        }
         const slotLen = (0, time_1.getSlotMinutes)();
-        const endMin = (Number(m) + slotLen) % 60;
-        const endHour = endMin === 0 ? Number(h) + 1 : Number(h);
+        const endTotal = hh * 60 + mm + slotLen;
+        const endMin = endTotal % 60;
+        const endHour = Math.floor(endTotal / 60) % 24;
         const entry = {
             day,
             start: `${h}:${m}`,
             end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
-            description: payload.description.trim(),
-            category: payload.category.trim()
+            description,
+            category
         };
         if (!groupedByDay.has(day))
             groupedByDay.set(day, []);
         groupedByDay.get(day).push(entry);
         if (pending.has(k))
             pending.delete(k);
-    });
+    }
     groupedByDay.forEach((list) => (0, db_1.saveEntries)(list));
     // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
     try {

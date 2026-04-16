@@ -149,7 +149,7 @@ export class SummaryViewComponent implements AfterViewInit  {
     const day = String(d.getDate()).padStart(2,'0');
     return `${y}-${m}-${day}`;
   }
-  private todayYmd(): string { return this.fmtLocal(new Date()); }
+  public todayYmd(): string { return this.fmtLocal(new Date()); }
   isToday = computed(() => this.day() === this.todayYmd());
   prevDay = computed(() => {
     const d = this.day();
@@ -238,7 +238,10 @@ export class SummaryViewComponent implements AfterViewInit  {
     const result = await this.exporter.exportDaySummary(d);
     if (!result.ok) {
       console.error('[summary] export failed', result.error);
+      this.showToast('Eksport fejlede. Prøv igen.');
+      return;
     }
+    this.showToast(`Eksporteret: ${result.filename}`);
   }
 
   private showToast(msg: string) {

@@ -51,6 +51,16 @@
 
       <div class="md:col-span-3 flex items-start gap-3 mt-2">
         <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="includeActiveSlot()" (ngModelChange)="includeActiveSlot.set($event)" name="include_active_slot" aria-describedby="include-active-help">
+          <span class="leading-tight">
+            Inkludér aktivt interval i "Log nu"
+            <span id="include-active-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Når slået til kan et igangværende interval logges med det samme, også hvis du er startet tidligere end normal starttid.</span>
+          </span>
+        </label>
+      </div>
+
+      <div class="md:col-span-3 flex items-start gap-3 mt-2">
+        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
           <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="autoFocusOnSlot()" (ngModelChange)="autoFocusOnSlot.set($event)" name="auto_focus_on_slot" aria-describedby="auto-focus-help">
           <span class="leading-tight">
             Bring vinduet i front og åbn logdialogen automatisk når et nyt interval starter

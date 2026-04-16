@@ -38,8 +38,14 @@ export class ManualLogComponent implements OnInit {
 
   async submit() {
     this.error.set('');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(this.date)) { this.error.set('Invalid date format'); return; }
+    if (!/^\d{2}:\d{2}$/.test(this.start) || !/^\d{2}:\d{2}$/.test(this.end)) { this.error.set('Invalid time format'); return; }
     const [sh,sm] = this.start.split(':').map(Number);
     const [eh,em] = this.end.split(':').map(Number);
+    if (![sh, sm, eh, em].every(Number.isFinite) || sh < 0 || sh > 23 || eh < 0 || eh > 23 || sm < 0 || sm > 59 || em < 0 || em > 59) {
+      this.error.set('Invalid time value');
+      return;
+    }
     const startMin = sh*60+sm, endMin = eh*60+em;
     if (endMin <= startMin) { this.error.set('End must be after start'); return; }
 
@@ -54,10 +60,11 @@ export class ManualLogComponent implements OnInit {
     const novel = slots.filter(k => !done.has(k));
     if (!novel.length) { this.error.set('No new slots to save.'); return; }
 
-    let finalDescription = this.description;
-    if (this.category === 'Andet' && this.andetDescription.trim()) {
-      finalDescription = this.andetDescription.trim();
-    }
+    const category = this.category.trim();
+    const baseDescription = this.description.trim();
+    const otherDescription = this.andetDescription.trim();
+    let finalDescription = category === 'Andet' ? otherDescription : baseDescription;
+    if (!category || !finalDescription) { this.error.set('Description and category are required.'); return; }
     await this.ipc.submitPending(novel, finalDescription, this.category);
     // Refresh signals for the affected day so Today/Day/Summary views update instantly
     this.ipc.loadDay(this.date);

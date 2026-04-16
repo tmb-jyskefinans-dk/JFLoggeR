@@ -53,7 +53,6 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   ngOnInit() {
     const list = this.ipc.pendingSlots();
     const promptSlot = this.ipc.lastPromptSlot ? this.ipc.lastPromptSlot() : null;
-    console.log(promptSlot, list);
     if (this.ipc.bulkSelectAllFlag && this.ipc.bulkSelectAllFlag()) {
       // Bulk selection mode triggered from tray
       this.selectedSlots.set([...list].sort());
@@ -112,10 +111,11 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   }
   async submit() {
     const slots = this.selectedSlots();
-    let finalDescription = this.description;
-    if (this.category === 'Andet' && this.andetDescription.trim()) {
-      finalDescription = this.andetDescription.trim();
-    }
+    const category = this.category.trim();
+    const baseDescription = this.description.trim();
+    const otherDescription = this.andetDescription.trim();
+    let finalDescription = category === 'Andet' ? otherDescription : baseDescription;
+    if (!slots.length || !category || !finalDescription) return;
     await this.ipc.submitPending(slots, finalDescription, this.category);
     // Derive affected day from first slot and trigger reload of day & summary signals
     if (slots.length) {

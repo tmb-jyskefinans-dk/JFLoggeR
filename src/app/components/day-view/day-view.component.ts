@@ -1,4 +1,4 @@
-import { Component, inject, ChangeDetectionStrategy, signal, computed, effect } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, OnDestroy } from '@angular/core';
 import { getCategoryColor } from '../../models/category-colors';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -12,7 +12,7 @@ import { ClockService } from '../../services/clock.service';
   templateUrl: './day-view.component.html',
   styleUrls: ['./day-view.component.scss']
 })
-export class DayViewComponent  {
+export class DayViewComponent implements OnDestroy {
   route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   clock = inject(ClockService);
@@ -197,15 +197,21 @@ export class DayViewComponent  {
     });
   });
 
+  private onPointerDown = (ev: PointerEvent) => {
+    if (!this.editingKey()) return;
+    const menu = document.querySelector('[data-cat-menu]');
+    if (menu && !menu.contains(ev.target as Node)) this.cancelEdit();
+  };
+
   // Initial days fetch (service already refreshes days in ctor, but this ensures up-to-date after first render)
   constructor() {
     this.ipc.getDays().then(() => {});
     // Close category menu on outside click
-    window.addEventListener('pointerdown', (ev: PointerEvent) => {
-      if (!this.editingKey()) return;
-      const menu = document.querySelector('[data-cat-menu]');
-      if (menu && !menu.contains(ev.target as Node)) this.cancelEdit();
-    });
+    window.addEventListener('pointerdown', this.onPointerDown);
+  }
+
+  ngOnDestroy() {
+    window.removeEventListener('pointerdown', this.onPointerDown);
   }
 
   remove(e: any) {

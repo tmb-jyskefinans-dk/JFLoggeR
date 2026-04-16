@@ -20,6 +20,7 @@ export type Settings = {
   work_end: string;      // "16:00"
   slot_minutes: number;  // 15
   weekdays_mask: number; // bitmask Sun..Sat (Sun=1<<0)
+  include_active_slot?: boolean; // include currently running slot in pending queue
   auto_focus_on_slot?: boolean; // bring app to front & open dialog on new slot
   notification_silent?: boolean; // notifications play no sound when true
   stale_threshold_minutes?: number; // minutes beyond slot length before stale prompt
@@ -39,6 +40,7 @@ const DEFAULT_SETTINGS: Settings = {
   work_end: '16:00',
   slot_minutes: 15,
   weekdays_mask: 0b0111110, // Mon–Fri
+  include_active_slot: true,
   auto_focus_on_slot: false,
   notification_silent: true,
   stale_threshold_minutes: 45,
@@ -78,6 +80,10 @@ export function initDb() {
   if (!db.data.settings) { db.data.settings = { ...DEFAULT_SETTINGS }; changed = true; }
   else {
     // ensure new fields
+    if (typeof db.data.settings.include_active_slot !== 'boolean') {
+      db.data.settings.include_active_slot = DEFAULT_SETTINGS.include_active_slot!;
+      changed = true;
+    }
     if (typeof db.data.settings.auto_focus_on_slot !== 'boolean') {
       db.data.settings.auto_focus_on_slot = DEFAULT_SETTINGS.auto_focus_on_slot!;
       changed = true;
@@ -107,6 +113,7 @@ export function saveSettings(s: Settings) {
     work_end: s.work_end,
     slot_minutes: Number(s.slot_minutes) || 15,
     weekdays_mask: Number(s.weekdays_mask) >>> 0,
+    include_active_slot: s.include_active_slot !== false,
     auto_focus_on_slot: !!s.auto_focus_on_slot,
     notification_silent: !!s.notification_silent,
     stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes!,

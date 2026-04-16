@@ -53,6 +53,7 @@ import { setExternalLogged, getExternalLogged } from './db';
 import {
   nextQuarter,
   previousSlotStart,
+  currentSlotStart,
   isWorkTime,
   isWorkdayEnabled,
   slotKey,
@@ -350,6 +351,9 @@ function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boo
     const key = slotKey(slot);
     if (!done.has(key)) enqueuePending(key, { silent: true });
   }
+  // Also include the currently running slot so users can log immediately
+  // when they start early or mid-slot while the app is running.
+  includeCurrentRunningSlot(now, done);
   // Single emit after bulk rebuild
   try { win?.webContents.send('queue:updated'); } catch { }
 }
@@ -374,8 +378,25 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeF
     if (!includeFuture && slotEnd.getTime() > now.getTime()) break; // stop at first slot that hasn't ended
     if (!doneOrLogged(key)) enqueuePending(key, { silent: true });
   }
+  includeCurrentRunningSlot(now, existing);
   try { win?.webContents.send('queue:updated'); } catch { }
   function doneOrLogged(key: string) { return existing.has(key); }
+}
+
+function includeCurrentRunningSlot(now: Date, existing: Set<string>) {
+  if (!isWorkdayEnabled(now)) return;
+  const settings = getSettings();
+  if (settings.include_active_slot === false) return;
+  const { h: endH, m: endM } = parseHM(settings.work_end);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const endMinutes = endH * 60 + endM;
+  // Keep the "normal day" end boundary; only expand start flexibility.
+  if (nowMinutes >= endMinutes) return;
+
+  const start = currentSlotStart(now);
+  const key = slotKey(start);
+  if (existing.has(key) || pending.has(key)) return;
+  enqueuePending(key, { silent: true });
 }
 
 // IPC handlers
@@ -443,20 +464,40 @@ ipcMain.handle('log:write', (_e, entry: { level: string; message: string; meta?:
 });
 
 
-ipcMain.handle('queue:get', () => Array.from(pending).sort());
+ipcMain.handle('queue:get', () => {
+  const now = new Date();
+  const day = toLocalDateYMD(now);
+  const existing = new Set(getDayEntries(day).map((e: any) => `${e.day}T${e.start}`));
+  includeCurrentRunningSlot(now, existing);
+  return Array.from(pending).sort();
+});
 ipcMain.handle(
   'queue:submit',
   (
     _e,
     payload: { slots: string[]; description: string; category: string }
   ) => {
+    if (!payload || !Array.isArray(payload.slots)) return { ok: false, error: 'Invalid payload' };
+    const description = String(payload.description ?? '').trim();
+    const category = String(payload.category ?? '').trim();
+    if (!description || !category) return { ok: false, error: 'Description and category are required' };
+
     const groupedByDay = new Map<string, any[]>();
-    payload.slots.forEach((k) => {
+    for (const k of payload.slots) {
+      if (typeof k !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(k)) {
+        return { ok: false, error: `Invalid slot key: ${String(k)}` };
+      }
       const [day, hm] = k.split('T');
       const [h, m] = hm.split(':');
+      const hh = Number(h);
+      const mm = Number(m);
+      if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+        return { ok: false, error: `Invalid slot time: ${k}` };
+      }
       const slotLen = getSlotMinutes();
-      const endMin = (Number(m) + slotLen) % 60;
-      const endHour = endMin === 0 ? Number(h) + 1 : Number(h);
+      const endTotal = hh * 60 + mm + slotLen;
+      const endMin = endTotal % 60;
+      const endHour = Math.floor(endTotal / 60) % 24;
       const entry = {
         day,
         start: `${h}:${m}`,
@@ -464,13 +505,13 @@ ipcMain.handle(
           2,
           '0'
         )}`,
-        description: payload.description.trim(),
-        category: payload.category.trim()
+        description,
+        category
       };
       if (!groupedByDay.has(day)) groupedByDay.set(day, []);
       groupedByDay.get(day)!.push(entry);
       if (pending.has(k)) pending.delete(k);
-    });
+    }
     groupedByDay.forEach((list) => saveEntries(list));
     // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
     try { win?.webContents.send('queue:updated'); } catch { }
