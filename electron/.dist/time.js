@@ -25,7 +25,8 @@ function parseHM(hm) {
 /** Slot length accessors */
 function getSlotMinutes() {
     // Always read dynamically so changes to settings apply immediately.
-    return (0, db_1.getSettings)().slot_minutes;
+    const parsed = Math.trunc(Number((0, db_1.getSettings)().slot_minutes));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 15;
 }
 /** Workday helpers */
 function isWorkdayEnabled(d = new Date()) {
@@ -67,6 +68,8 @@ function previousSlotStart(now = new Date()) {
 function daySlots(date = new Date()) {
     const s = (0, db_1.getSettings)();
     const gran = getSlotMinutes();
+    if (gran <= 0)
+        return [];
     // Respect configured working days; return empty when disabled for this date.
     if (!isWorkdayEnabled(date))
         return [];

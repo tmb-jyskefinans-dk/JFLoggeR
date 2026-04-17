@@ -52,8 +52,14 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
 
   ngOnInit() {
     const list = this.ipc.pendingSlots();
+    const preselected = this.ipc.preselectedSlots();
     const promptSlot = this.ipc.lastPromptSlot ? this.ipc.lastPromptSlot() : null;
-    if (this.ipc.bulkSelectAllFlag && this.ipc.bulkSelectAllFlag()) {
+    if (preselected?.length) {
+      const selected = preselected.filter(s => list.includes(s));
+      if (selected.length) this.selectedSlots.set([...selected].sort());
+      else if (list.length) this.selectedSlots.set(list.slice(0, 1));
+      this.ipc.preselectedSlots.set(null);
+    } else if (this.ipc.bulkSelectAllFlag && this.ipc.bulkSelectAllFlag()) {
       // Bulk selection mode triggered from tray
       this.selectedSlots.set([...list].sort());
       // Reset flag so future opens revert to normal selection heuristics

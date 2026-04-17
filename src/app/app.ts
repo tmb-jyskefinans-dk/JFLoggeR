@@ -27,6 +27,8 @@ export class AppComponent implements OnDestroy {
   // Track which prompt slot has already triggered an auto-open to avoid reopening immediately after close
   handledPromptSlot = signal<string|null>(null);
   theme = inject(ThemeService);
+  private removeDialogOpenLogListener?: () => void;
+  private removeDialogOpenLogAllListener?: () => void;
 
   private onOpenLogDialog = (e: Event) => {
     const ce = e as CustomEvent<{ slot?: string }>;
@@ -78,6 +80,10 @@ export class AppComponent implements OnDestroy {
 
   constructor() {
     effect(() => this.pendingCount.set(this.ipc.pendingSlots().length));
+    effect(() => {
+      this.clock.minuteTick();
+      this.ipc.loadPending();
+    });
 
     // Open log dialog automatically when a prompt arrives (if not already open)
     effect(() => {
@@ -92,7 +98,7 @@ export class AppComponent implements OnDestroy {
 
     // Manual tray-triggered open should always open even if same slot was previously handled.
     try {
-      (window as any).workApi.onDialogOpenLog?.((slot?: string) => {
+      const disposeDialogOpenLog = (window as any).workApi.onDialogOpenLog?.((slot?: string) => {
         if (!this.dialogOpen()) {
           this.dialogOpen.set(true);
         } else {
@@ -100,12 +106,18 @@ export class AppComponent implements OnDestroy {
           if (slot && slot !== this.handledPromptSlot()) this.handledPromptSlot.set(slot);
         }
       });
-      (window as any).workApi.onDialogOpenLogAll?.(() => {
+      if (typeof disposeDialogOpenLog === 'function') {
+        this.removeDialogOpenLogListener = disposeDialogOpenLog;
+      }
+      const disposeDialogOpenLogAll = (window as any).workApi.onDialogOpenLogAll?.(() => {
         // Force open dialog; selection will be handled in LogDialog ngOnInit via bulkSelectAllFlag.
         if (!this.dialogOpen()) this.dialogOpen.set(true); else {
           // If already open we can retrigger by closing & reopening or simply rely on user adjusting selection; keep open.
         }
       });
+      if (typeof disposeDialogOpenLogAll === 'function') {
+        this.removeDialogOpenLogAllListener = disposeDialogOpenLogAll;
+      }
     } catch { /* ignore */ }
 
     // Listen for custom event dispatched by DayViewComponent to open dialog for a missing slot
@@ -145,5 +157,7 @@ export class AppComponent implements OnDestroy {
     window.removeEventListener('open-log-dialog', this.onOpenLogDialog);
     window.removeEventListener('keydown', this.onKeydown);
     window.removeEventListener('pointerdown', this.onPointerdown);
+    this.removeDialogOpenLogListener?.();
+    this.removeDialogOpenLogAllListener?.();
   }
 }

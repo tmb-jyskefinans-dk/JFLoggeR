@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS = {
     slot_minutes: 15,
     weekdays_mask: 0b0111110, // Mon–Fri
     include_active_slot: true,
+    azure_tenant_id: '',
+    azure_client_id: '',
     auto_focus_on_slot: false,
     notification_silent: true,
     stale_threshold_minutes: 45,
@@ -35,6 +37,12 @@ const DEFAULT_SETTINGS = {
     group_notifications: true
 };
 let db;
+function sanitizeSlotMinutes(value) {
+    const parsed = Math.trunc(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0)
+        return DEFAULT_SETTINGS.slot_minutes;
+    return parsed;
+}
 function ensureDb() {
     // Lazy init safeguard in case callers access before main.ts calls initDb()
     if (!db) {
@@ -64,9 +72,21 @@ function initDb() {
         changed = true;
     }
     else {
+        if (sanitizeSlotMinutes(db.data.settings.slot_minutes) !== db.data.settings.slot_minutes) {
+            db.data.settings.slot_minutes = sanitizeSlotMinutes(db.data.settings.slot_minutes);
+            changed = true;
+        }
         // ensure new fields
         if (typeof db.data.settings.include_active_slot !== 'boolean') {
             db.data.settings.include_active_slot = DEFAULT_SETTINGS.include_active_slot;
+            changed = true;
+        }
+        if (typeof db.data.settings.azure_tenant_id !== 'string') {
+            db.data.settings.azure_tenant_id = DEFAULT_SETTINGS.azure_tenant_id;
+            changed = true;
+        }
+        if (typeof db.data.settings.azure_client_id !== 'string') {
+            db.data.settings.azure_client_id = DEFAULT_SETTINGS.azure_client_id;
             changed = true;
         }
         if (typeof db.data.settings.auto_focus_on_slot !== 'boolean') {
@@ -117,9 +137,11 @@ function saveSettings(s) {
     db.data.settings = {
         work_start: s.work_start,
         work_end: s.work_end,
-        slot_minutes: Number(s.slot_minutes) || 15,
+        slot_minutes: sanitizeSlotMinutes(s.slot_minutes),
         weekdays_mask: Number(s.weekdays_mask) >>> 0,
         include_active_slot: s.include_active_slot !== false,
+        azure_tenant_id: String(s.azure_tenant_id ?? '').trim(),
+        azure_client_id: String(s.azure_client_id ?? '').trim(),
         auto_focus_on_slot: !!s.auto_focus_on_slot,
         notification_silent: !!s.notification_silent,
         stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes,
@@ -278,7 +300,7 @@ function lastNEntries(n = 8) {
 function importExternalLines(raw) {
     ensureDb();
     db.read();
-    const slotMinutes = getSettings().slot_minutes; // dynamic granularity
+    const slotMinutes = sanitizeSlotMinutes(getSettings().slot_minutes); // dynamic granularity
     const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
     const imported = [];
     const details = [];

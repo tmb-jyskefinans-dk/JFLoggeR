@@ -21,11 +21,17 @@ export class SettingsComponent {
   slotMinutes = signal<number>(15);
   weekdayState = signal<boolean[]>([false, true, true, true, true, true, false]);
   includeActiveSlot = signal<boolean>(true);
+  azureTenantId = signal<string>('');
+  azureClientId = signal<string>('');
   autoFocusOnSlot = signal<boolean>(false);
   notificationSilent = signal<boolean>(true);
   staleThresholdMinutes = signal<number>(45);
   autoStartOnLogin = signal<boolean>(false);
   groupNotifications = signal<boolean>(true);
+
+  authBusy = signal<boolean>(false);
+  authError = signal<string>('');
+  authStatus = this.ipc.authStatus;
 
   // Import feature signals
   importText = signal<string>('');
@@ -56,6 +62,8 @@ export class SettingsComponent {
            s.slot_minutes !== this.slotMinutes() ||
            maskOrig !== maskNow ||
            ((s.include_active_slot !== false) !== this.includeActiveSlot()) ||
+           ((s.azure_tenant_id ?? '') !== this.azureTenantId()) ||
+           ((s.azure_client_id ?? '') !== this.azureClientId()) ||
            (!!s.auto_focus_on_slot !== this.autoFocusOnSlot()) ||
            (!!s.notification_silent !== this.notificationSilent()) ||
            (Number(s.stale_threshold_minutes) !== this.staleThresholdMinutes()) ||
@@ -66,6 +74,7 @@ export class SettingsComponent {
   constructor() {
     const s = this.ipc.settings();
   if (s) { this.apply(s); this.initialSettings.set(s); } else this.ipc.loadSettings();
+    this.ipc.loadAuthStatus();
     // Reactively apply settings when signal updates
     effect(() => {
       const v = this.ipc.settings();
@@ -79,6 +88,8 @@ export class SettingsComponent {
     this.slotMinutes.set(s.slot_minutes);
     this.weekdayState.set(Array.from({length:7},(_,i)=> (s.weekdays_mask & (1<<i))!==0));
     this.includeActiveSlot.set(s.include_active_slot !== false);
+    this.azureTenantId.set(s.azure_tenant_id ?? '');
+    this.azureClientId.set(s.azure_client_id ?? '');
     this.autoFocusOnSlot.set(!!s.auto_focus_on_slot);
     this.notificationSilent.set(!!s.notification_silent);
     this.staleThresholdMinutes.set(Number(s.stale_threshold_minutes) || 45);
@@ -94,6 +105,8 @@ export class SettingsComponent {
       slot_minutes: Number(this.slotMinutes()),
       weekdays_mask,
       include_active_slot: this.includeActiveSlot(),
+      azure_tenant_id: this.azureTenantId().trim(),
+      azure_client_id: this.azureClientId().trim(),
       auto_focus_on_slot: this.autoFocusOnSlot(),
       notification_silent: this.notificationSilent(),
       stale_threshold_minutes: Number(this.staleThresholdMinutes()),
@@ -120,6 +133,38 @@ export class SettingsComponent {
       copy[i] = !copy[i];
       return copy;
     });
+  }
+
+  async signInMicrosoft() {
+    this.authError.set('');
+    this.authBusy.set(true);
+    try {
+      const resp = await this.ipc.signInMicrosoft();
+      if (!resp?.ok) {
+        this.authError.set(resp?.error ?? 'Sign-in failed');
+      }
+      await this.ipc.loadAuthStatus();
+    } catch (err) {
+      this.authError.set(String(err));
+    } finally {
+      this.authBusy.set(false);
+    }
+  }
+
+  async signOutMicrosoft() {
+    this.authError.set('');
+    this.authBusy.set(true);
+    try {
+      const resp = await this.ipc.signOutMicrosoft();
+      if (!resp?.ok) {
+        this.authError.set(resp?.error ?? 'Sign-out failed');
+      }
+      await this.ipc.loadAuthStatus();
+    } catch (err) {
+      this.authError.set(String(err));
+    } finally {
+      this.authBusy.set(false);
+    }
   }
 
   performImport() {

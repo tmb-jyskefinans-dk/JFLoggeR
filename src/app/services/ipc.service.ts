@@ -13,26 +13,39 @@ declare global {
       getPendingSlots(): Promise<string[]>;
       getSettings(): Promise<any>;
       saveSettings(settings: any): Promise<void>;
-      submitSlots(payload: { slots: string[], description: string, category: string }): Promise<{ ok: boolean }>;
-  deleteEntry(day: string, start: string): Promise<{ ok: boolean, removed?: number }>;
-      onPrompt(cb: (d: any) => void): void;
-  onFocus(cb: () => void): void;
-  onAppReady?: (cb: () => void) => void;
+        submitSlots(payload: { slots: string[], description: string, category: string }): Promise<{ ok: boolean; error?: string }>;
+      deleteEntry(day: string, start: string): Promise<{ ok: boolean, removed?: number; error?: string }>;
+        onPrompt(cb: (d: any) => void): (() => void) | void;
+      onFocus(cb: () => void): (() => void) | void;
+      onAppReady?: (cb: () => void) => (() => void) | void;
   sendTestNotification?(body?: string): Promise<{ ok: boolean }>;
-  onQueueUpdated?(cb: () => void): void;
+      onQueueUpdated?(cb: () => void): (() => void) | void;
   // Window controls
   minimizeWindow?(): Promise<{ ok: boolean }>;
   toggleMaximizeWindow?(): Promise<{ ok: boolean, maximized?: boolean }>;
   closeWindow?(): Promise<{ ok: boolean }>;
-  onMaximizeState?(cb: (s: { maximized: boolean }) => void): void;
+  onMaximizeState?(cb: (s: { maximized: boolean }) => void): (() => void) | void;
   getExternalLogged?(day: string): Promise<{ day: string; exported: boolean }>;
   setExternalLogged?(day: string, exported: boolean): Promise<{ day: string; exported: boolean }>;
       importExternal?(raw: string): Promise<{ ok: boolean; imported?: number; skipped?: number; details?: { line: number; reason: string }[]; error?: string }>;
+      getAuthStatus?(): Promise<AuthStatus>;
+      signInMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
+      signOutMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
     }
   }
 }
 
 export interface SummaryRow { description: string; category: string; slots: number; minutes: number; }
+export interface AuthStatus {
+  configured: boolean;
+  signedIn: boolean;
+  method: 'device-code';
+  username?: string;
+  name?: string;
+  tenantId?: string;
+  clientId?: string;
+  error?: string;
+}
 
 @Injectable({ providedIn: 'root' })
 export class IpcService {
@@ -40,14 +53,18 @@ export class IpcService {
   dayEntries = signal<any[]>([]);
   summary = signal<SummaryRow[]>([]);
   pendingSlots = signal<string[]>([]);
+  pendingLastLoadedAt = signal<number|null>(null);
   recent = signal<any[]>([]);
   settings = signal<any|null>(null);
+  authStatus = signal<AuthStatus>({ configured: false, signedIn: false, method: 'device-code' });
   lastPromptSlot = signal<string|null>(null);
+  preselectedSlots = signal<string[]|null>(null);
   windowMaximized = signal<boolean>(false);
   // Flag to indicate next opened log dialog should preselect all pending slots
   bulkSelectAllFlag = signal(false);
   // External exported status map (day -> true if logged externally)
   dayExported = signal<Map<string, boolean>>(new Map());
+  private latestLoadDayRequest = 0;
 
 
   constructor() {
@@ -70,8 +87,9 @@ export class IpcService {
     this.refreshDays();
     this.loadPending();
     this.loadRecent();
-    // Attempt immediate settings load; handlers are registered at module load in main.ts
+    // Attempt immediate settings/auth load; handlers are registered at module load in main.ts
     this.loadSettings();
+    this.loadAuthStatus();
     // If optional app ready hook exists (newer preload), use it to re-attempt once
     try {
       window.workApi.onAppReady?.(() => {
@@ -100,6 +118,10 @@ export class IpcService {
       }
       this.dayExported.set(exportMap);
       this.days.set(list.map((d: any) => ({ day: d.day, slots: d.slots })));
+    }).catch(err => {
+      console.error('[ipc] refreshDays failed', err);
+      this.days.set([]);
+      this.dayExported.set(new Map());
     });
   }
 
@@ -107,24 +129,62 @@ export class IpcService {
     return window.workApi.getDays();
   }
   loadDay(day: string): Promise<void> {
-    const entriesP = window.workApi.getDayEntries(day).then(this.dayEntries.set);
-    const summaryP = window.workApi.getSummary(day).then(this.summary.set);
+    const requestId = ++this.latestLoadDayRequest;
+    const isCurrent = () => requestId === this.latestLoadDayRequest;
+    const entriesP = window.workApi.getDayEntries(day)
+      .then((entries) => {
+        if (isCurrent()) this.dayEntries.set(entries);
+      })
+      .catch(err => {
+        console.error('[ipc] loadDay entries failed', { day, err });
+        if (isCurrent()) this.dayEntries.set([]);
+      });
+    const summaryP = window.workApi.getSummary(day)
+      .then((summary) => {
+        if (isCurrent()) this.summary.set(summary);
+      })
+      .catch(err => {
+        console.error('[ipc] loadDay summary failed', { day, err });
+        if (isCurrent()) this.summary.set([]);
+      });
     if (window.workApi.getExternalLogged) {
       window.workApi.getExternalLogged(day).then(resp => {
+        if (!isCurrent()) return;
         const m = new Map(this.dayExported()); m.set(day, !!resp.exported); this.dayExported.set(m);
-      }).catch(()=>{});
+      }).catch((err) => {
+        console.error('[ipc] loadDay external logged failed', { day, err });
+      });
     }
     return Promise.all([entriesP, summaryP]).then(() => {});
   }
   loadRecent() {
     // Prefer today-aware recent if available
     if (window.workApi.getRecentToday) {
-      window.workApi.getRecentToday(20).then(this.recent.set);
+      window.workApi.getRecentToday(20)
+        .then(this.recent.set)
+        .catch(err => {
+          console.error('[ipc] loadRecent today failed', err);
+          this.recent.set([]);
+        });
     } else {
-      window.workApi.getRecent(20).then(this.recent.set);
+      window.workApi.getRecent(20)
+        .then(this.recent.set)
+        .catch(err => {
+          console.error('[ipc] loadRecent failed', err);
+          this.recent.set([]);
+        });
     }
   }
-  loadPending() { window.workApi.getPendingSlots().then(this.pendingSlots.set); }
+  loadPending() {
+    window.workApi.getPendingSlots().then(list => {
+      this.pendingSlots.set(list);
+      this.pendingLastLoadedAt.set(Date.now());
+    }).catch(err => {
+      console.error('[ipc] loadPending failed', err);
+      this.pendingSlots.set([]);
+      this.pendingLastLoadedAt.set(Date.now());
+    });
+  }
   loadSettings() {
     window.workApi.getSettings()
       .then(this.settings.set)
@@ -154,21 +214,69 @@ export class IpcService {
       });
   }
 
+  loadAuthStatus() {
+    return window.workApi.getAuthStatus?.()
+      .then((status) => {
+        if (status) this.authStatus.set(status);
+        return status;
+      })
+      .catch(err => {
+        console.error('[ipc] loadAuthStatus failed', err);
+        return undefined;
+      });
+  }
+
+  signInMicrosoft() {
+    return window.workApi.signInMicrosoft?.()
+      .then(resp => {
+        if (resp?.status) this.authStatus.set(resp.status);
+        return resp;
+      })
+      .catch(err => {
+        console.error('[ipc] signInMicrosoft failed', err);
+        throw err;
+      });
+  }
+
+  signOutMicrosoft() {
+    return window.workApi.signOutMicrosoft?.()
+      .then(resp => {
+        if (resp?.status) this.authStatus.set(resp.status);
+        return resp;
+      })
+      .catch(err => {
+        console.error('[ipc] signOutMicrosoft failed', err);
+        throw err;
+      });
+  }
+
 
   submitPending(slots: string[], description: string, category: string) {
     return window.workApi.submitSlots({ slots, description, category })
-      .then(() => { this.loadPending(); this.refreshDays(); });
+      .then((resp) => {
+        if (!resp?.ok) {
+          throw new Error(resp?.error || 'submitPending failed');
+        }
+        this.loadPending();
+        this.refreshDays();
+      });
   }
 
   deleteEntry(day: string, start: string) {
     return window.workApi.deleteEntry(day, start)
-      .then(() => {
+      .then((resp) => {
+        if (!resp?.ok) {
+          throw new Error(resp?.error || 'deleteEntry failed');
+        }
         // Refresh affected signals so UI updates immediately
         this.loadDay(day);
         this.refreshDays();
         this.loadPending(); // slot may have been re-queued if in past
       })
-      .catch(err => console.error('[ipc] deleteEntry failed', err));
+      .catch(err => {
+        console.error('[ipc] deleteEntry failed', err);
+        throw err;
+      });
   }
 
   // Convenience wrapper for debug notification trigger
@@ -188,7 +296,10 @@ export class IpcService {
         const m = new Map(this.dayExported()); m.set(day, !!resp.exported); this.dayExported.set(m);
         this.refreshDays();
       })
-      .catch(err => console.error('[ipc] setDayExported failed', err));
+      .catch(err => {
+        console.error('[ipc] setDayExported failed', err);
+        throw err;
+      });
   }
 
   importExternal(raw: string) {
@@ -204,6 +315,9 @@ export class IpcService {
       this.refreshDays();
       this.loadPending();
       return r;
+    }).catch(err => {
+      console.error('[ipc] importExternal failed', err);
+      throw err;
     });
   }
 }

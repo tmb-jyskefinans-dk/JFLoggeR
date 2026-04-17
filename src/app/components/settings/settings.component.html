@@ -10,6 +10,51 @@
     </div>
   </div>
 
+  <section class="mb-6 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/50 p-4">
+    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div class="space-y-1">
+        <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Microsoft Entra login</h3>
+        @if(authStatus().signedIn) {
+          <p class="text-xs text-slate-600 dark:text-slate-300">
+            Logget ind som {{ authStatus().name || authStatus().username }}
+          </p>
+        } @else {
+          <p class="text-xs text-slate-500 dark:text-slate-400">Ikke logget ind</p>
+        }
+      </div>
+      <div class="flex items-center gap-2">
+        @if(authStatus().signedIn) {
+          <button type="button" (click)="signOutMicrosoft()" [disabled]="authBusy()"
+            class="inline-flex items-center justify-center rounded-md text-sm font-medium px-3 h-9 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">Log ud</button>
+        } @else {
+          <button type="button" (click)="signInMicrosoft()" [disabled]="authBusy() || !authStatus().configured"
+            class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-9 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">Log ind med Microsoft</button>
+        }
+      </div>
+    </div>
+
+    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-medium text-slate-600 dark:text-slate-300">Tenant ID</label>
+        <input type="text" [ngModel]="azureTenantId()" (ngModelChange)="azureTenantId.set($event)" name="azure_tenant_id"
+          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-medium text-slate-600 dark:text-slate-300">Client ID</label>
+        <input type="text" [ngModel]="azureClientId()" (ngModelChange)="azureClientId.set($event)" name="azure_client_id"
+          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+      </div>
+    </div>
+    <p class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Find disse i <strong>Azure Portal → App registrations → din app</strong>. Gem indstillinger for at aktivere login-knappen.</p>
+
+    @if(authError()) {
+      <p class="mt-2 text-xs text-rose-600 dark:text-rose-300">{{authError()}}</p>
+    }
+    <p class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Login bruger device-code flow: du får en kode der skal indtastes på <strong>aka.ms/devicelogin</strong>.</p>
+  </section>
+
   @if(!initialSettings()) {
     <div class="grid gap-4 md:grid-cols-2">
       @for(i of [1,2,3,4]; track i) {

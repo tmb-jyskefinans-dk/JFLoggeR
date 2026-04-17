@@ -1,4 +1,4 @@
-import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, AfterViewInit } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, AfterViewInit, OnDestroy } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { IpcService, SummaryRow } from '../../services/ipc.service';
@@ -17,7 +17,7 @@ import { ExportService } from '../../services/export.service';
     '(window:keydown)': 'onKeydown($event)'
   }
 })
-export class SummaryViewComponent implements AfterViewInit  {
+export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   private route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   exporter = inject(ExportService);
@@ -138,7 +138,8 @@ export class SummaryViewComponent implements AfterViewInit  {
 
   private lastRequest = 0;
   private initialized = false;
-  private toastTimeout: any = null;
+  private toastTimeout: ReturnType<typeof setTimeout> | null = null;
+  private animationTimeout: ReturnType<typeof setTimeout> | null = null;
   toast = signal<string | null>(null);
 
   // Navigation helpers
@@ -246,9 +247,10 @@ export class SummaryViewComponent implements AfterViewInit  {
 
   private showToast(msg: string) {
     this.toast.set(msg);
-    clearTimeout(this.toastTimeout);
+    if (this.toastTimeout) clearTimeout(this.toastTimeout);
     this.toastTimeout = setTimeout(() => {
       this.toast.set(null);
+      this.toastTimeout = null;
     }, 3000);
   }
 
@@ -261,8 +263,12 @@ export class SummaryViewComponent implements AfterViewInit  {
     this.animResetToken++;
     this.animateBars.set(false);
     this.animateDonut.set(false);
+    if (this.animationTimeout) clearTimeout(this.animationTimeout);
     // Schedule start after microtask to allow DOM bindings update
-    setTimeout(() => this.startAnimations(), 50);
+    this.animationTimeout = setTimeout(() => {
+      this.startAnimations();
+      this.animationTimeout = null;
+    }, 50);
   }
 
   private startAnimations() {
@@ -274,4 +280,11 @@ export class SummaryViewComponent implements AfterViewInit  {
   }
 
   getColor(cat: string) { return getCategoryColor(cat); }
+
+  ngOnDestroy() {
+    if (this.toastTimeout) clearTimeout(this.toastTimeout);
+    if (this.animationTimeout) clearTimeout(this.animationTimeout);
+    this.toastTimeout = null;
+    this.animationTimeout = null;
+  }
 }

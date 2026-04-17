@@ -26,12 +26,40 @@ function writeLog(level: string, message: string, meta?: any) {
   } catch (e) { /* last-chance; avoid throwing in logger */ }
 }
 
+let fatalShutdownInProgress = false;
+
+function handleFatalProcessError(kind: 'uncaughtException' | 'unhandledRejection', error: unknown) {
+  const err = error as { message?: string; stack?: string };
+  writeLog(kind, err?.message || String(error), {
+    stack: err?.stack,
+    reason: kind === 'unhandledRejection' ? error : undefined
+  });
+
+  // Prevent duplicate shutdown attempts when multiple fatal errors arrive.
+  if (fatalShutdownInProgress) return;
+  fatalShutdownInProgress = true;
+
+  try { win?.webContents.send('app:fatal-error', { kind, message: err?.message || String(error) }); } catch { }
+
+  if (!app.isPackaged) {
+    // Keep development sessions alive for faster debugging after logging the failure.
+    fatalShutdownInProgress = false;
+    return;
+  }
+
+  setTimeout(() => {
+    try { app.exit(1); } catch { }
+  }, 1500);
+
+  try { app.quit(); } catch { }
+}
+
 // Capture process-level failures early
 process.on('uncaughtException', (err) => {
-  writeLog('uncaughtException', err?.message || String(err), { stack: err?.stack });
+  handleFatalProcessError('uncaughtException', err);
 });
-process.on('unhandledRejection', (reason: any) => {
-  writeLog('unhandledRejection', typeof reason === 'string' ? reason : (reason?.message || 'promise rejection'), { reason });
+process.on('unhandledRejection', (reason: unknown) => {
+  handleFatalProcessError('unhandledRejection', reason);
 });
 
 import {
@@ -49,6 +77,7 @@ import {
 } from './db';
 import { computeStaleSlot } from './stale';
 import { setExternalLogged, getExternalLogged } from './db';
+import { azureAuth } from './auth';
 
 import {
   nextQuarter,
@@ -399,13 +428,42 @@ function includeCurrentRunningSlot(now: Date, existing: Set<string>) {
   enqueuePending(key, { silent: true });
 }
 
+function logIpcFailure(channel: string, err: unknown) {
+  const error = err as { message?: string; stack?: string };
+  writeLog('error', `IPC handler failed: ${channel}`, {
+    message: error?.message ?? String(err),
+    stack: error?.stack
+  });
+}
+
 // IPC handlers
 console.log('[main] registering IPC handlers...');
-ipcMain.handle('db:get-day', (_e, day: string) => getDayEntries(day));
-ipcMain.handle('db:get-days', () => getDays());
+ipcMain.handle('db:get-day', (_e, day: string) => {
+  try {
+    return getDayEntries(day);
+  } catch (e) {
+    logIpcFailure('db:get-day', e);
+    throw e;
+  }
+});
+ipcMain.handle('db:get-days', () => {
+  try {
+    return getDays();
+  } catch (e) {
+    logIpcFailure('db:get-days', e);
+    throw e;
+  }
+});
 ipcMain.handle('db:get-external-logged', (_e, day: string) => ({ day, exported: getExternalLogged(day) }));
 ipcMain.handle('db:set-external-logged', (_e, day: string, exported: boolean) => setExternalLogged(day, exported));
-ipcMain.handle('db:save-entries', (_e, entries: any[]) => saveEntries(entries));
+ipcMain.handle('db:save-entries', (_e, entries: any[]) => {
+  try {
+    return saveEntries(entries);
+  } catch (e) {
+    logIpcFailure('db:save-entries', e);
+    throw e;
+  }
+});
 ipcMain.handle('db:import-external', (_e, raw: string) => {
   try {
     const result = importExternalLines(String(raw ?? ''));
@@ -416,7 +474,14 @@ ipcMain.handle('db:import-external', (_e, raw: string) => {
     return { ok: false, error: String(e) };
   }
 });
-ipcMain.handle('db:get-summary', (_e, day: string) => getSummary(day));
+ipcMain.handle('db:get-summary', (_e, day: string) => {
+  try {
+    return getSummary(day);
+  } catch (e) {
+    logIpcFailure('db:get-summary', e);
+    throw e;
+  }
+});
 ipcMain.handle('db:get-recent', (_e, limit?: number) =>
   getDistinctRecent(limit ?? 20)
 );
@@ -442,20 +507,39 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   return { ok: true, settings: after };
 });
 
+ipcMain.handle('auth:get-status', () => azureAuth.getStatus());
+ipcMain.handle('auth:signin', async () => {
+  const result = await azureAuth.signInInteractive();
+  if (!result.ok) {
+    writeLog('warn', 'Azure sign-in failed', { error: result.error });
+  }
+  return result;
+});
+ipcMain.handle('auth:signout', async () => {
+  const result = await azureAuth.signOut();
+  writeLog('info', 'Azure sign-out completed');
+  return result;
+});
+
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
 ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
-  const removed = deleteEntry(day, start);
   try {
-    // If the slot is in the past (earlier than now), add back to pending so user can re-log
-    const [y, m, d] = day.split('-').map(Number);
-    const [hh, mm] = start.split(':').map(Number);
-    const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
-    const now = new Date();
-    const isToday = day === toLocalDateYMD(now);
-    const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isWorkdayEnabled(slotDate);
-    if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
-  } catch { /* ignore parse errors */ }
-  return { ok: true, removed };
+    const removed = deleteEntry(day, start);
+    try {
+      // If the slot is in the past (earlier than now), add back to pending so user can re-log
+      const [y, m, d] = day.split('-').map(Number);
+      const [hh, mm] = start.split(':').map(Number);
+      const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+      const now = new Date();
+      const isToday = day === toLocalDateYMD(now);
+      const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isWorkdayEnabled(slotDate);
+      if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
+    } catch { /* ignore parse errors */ }
+    return { ok: true, removed };
+  } catch (e) {
+    logIpcFailure('db:delete-entry', e);
+    return { ok: false, removed: 0, error: String(e) };
+  }
 });
 
 // Generic renderer -> main log sink
@@ -477,42 +561,51 @@ ipcMain.handle(
     _e,
     payload: { slots: string[]; description: string; category: string }
   ) => {
-    if (!payload || !Array.isArray(payload.slots)) return { ok: false, error: 'Invalid payload' };
-    const description = String(payload.description ?? '').trim();
-    const category = String(payload.category ?? '').trim();
-    if (!description || !category) return { ok: false, error: 'Description and category are required' };
+    try {
+      if (!payload || !Array.isArray(payload.slots)) return { ok: false, error: 'Invalid payload' };
+      const description = String(payload.description ?? '').trim();
+      const category = String(payload.category ?? '').trim();
+      if (!description || !category) return { ok: false, error: 'Description and category are required' };
 
-    const groupedByDay = new Map<string, any[]>();
-    for (const k of payload.slots) {
-      if (typeof k !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(k)) {
-        return { ok: false, error: `Invalid slot key: ${String(k)}` };
+      const groupedByDay = new Map<string, any[]>();
+      const consumedKeys: string[] = [];
+      for (const k of payload.slots) {
+        if (typeof k !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(k)) {
+          return { ok: false, error: `Invalid slot key: ${String(k)}` };
+        }
+        const [day, hm] = k.split('T');
+        const [h, m] = hm.split(':');
+        const hh = Number(h);
+        const mm = Number(m);
+        if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+          return { ok: false, error: `Invalid slot time: ${k}` };
+        }
+        const slotLen = getSlotMinutes();
+        const endTotal = hh * 60 + mm + slotLen;
+        const endMin = endTotal % 60;
+        const endHour = Math.floor(endTotal / 60) % 24;
+        const entry = {
+          day,
+          start: `${h}:${m}`,
+          end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(
+            2,
+            '0'
+          )}`,
+          description,
+          category
+        };
+        if (!groupedByDay.has(day)) groupedByDay.set(day, []);
+        groupedByDay.get(day)!.push(entry);
+        consumedKeys.push(k);
       }
-      const [day, hm] = k.split('T');
-      const [h, m] = hm.split(':');
-      const hh = Number(h);
-      const mm = Number(m);
-      if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
-        return { ok: false, error: `Invalid slot time: ${k}` };
+      groupedByDay.forEach((list) => saveEntries(list));
+      for (const key of consumedKeys) {
+        if (pending.has(key)) pending.delete(key);
       }
-      const slotLen = getSlotMinutes();
-      const endTotal = hh * 60 + mm + slotLen;
-      const endMin = endTotal % 60;
-      const endHour = Math.floor(endTotal / 60) % 24;
-      const entry = {
-        day,
-        start: `${h}:${m}`,
-        end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(
-          2,
-          '0'
-        )}`,
-        description,
-        category
-      };
-      if (!groupedByDay.has(day)) groupedByDay.set(day, []);
-      groupedByDay.get(day)!.push(entry);
-      if (pending.has(k)) pending.delete(k);
+    } catch (e) {
+      logIpcFailure('queue:submit', e);
+      return { ok: false, error: String(e) };
     }
-    groupedByDay.forEach((list) => saveEntries(list));
     // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
     try { win?.webContents.send('queue:updated'); } catch { }
     // Update lastEntryEndTime for today

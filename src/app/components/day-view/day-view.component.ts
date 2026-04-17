@@ -2,6 +2,7 @@ import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, O
 import { getCategoryColor } from '../../models/category-colors';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { IpcService } from '../../services/ipc.service';
 import { ClockService } from '../../services/clock.service';
 
@@ -16,9 +17,12 @@ export class DayViewComponent implements OnDestroy {
   route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   clock = inject(ClockService);
+  routeParamMap = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
 
   // Source signals
   day = signal<string>('');
+  isTodayView = signal(false);
+  selectedMissingSlots = signal<string[]>([]);
 
   // Category edit state
   editingKey = signal<string|null>(null);
@@ -91,12 +95,22 @@ export class DayViewComponent implements OnDestroy {
   entries = computed(() => this.ipc.dayEntries());
   days = computed(() => this.ipc.days());
   settings = computed(() => this.ipc.settings());
+  pendingSlotsForDay = computed(() => {
+    const day = this.day();
+    if (!day) return [] as string[];
+    const prefix = `${day}T`;
+    return this.ipc.pendingSlots().filter(s => s.startsWith(prefix));
+  });
 
   /**
    * Combined rows (real entries + missing placeholder intervals) sorted by start time.
    * A placeholder row has shape { start: string; end: string; missing: true }.
+   * Depends on clock.currentTime() to auto-update missing blocks as time passes.
    */
   rows = computed(() => {
+    // Include currentTime to trigger refresh every minute
+    this.clock.currentTime();
+    
     const list = this.entries();
     const s = this.settings();
     const day = this.day();
@@ -128,10 +142,10 @@ export class DayViewComponent implements OnDestroy {
     // Current time filtering for today: only include missing slots that have ended already.
     let nowLimitM = Infinity;
     if (day === this.clock.today()) {
-      const now = new Date();
-      nowLimitM = now.getHours() * 60 + now.getMinutes();
+      nowLimitM = this.clock.currentTime();
     }
     const placeholders: any[] = [];
+    const placeholderStarts = new Set<string>();
     for (let m = startM; m < endM; m += slotMinutes) {
       if (m >= nowLimitM) break; // don't show future intervals for current day
       if (!covered.has(m)) {
@@ -141,12 +155,46 @@ export class DayViewComponent implements OnDestroy {
         const eh = Math.floor(endMin / 60), emm = endMin % 60;
         const end = `${String(eh).padStart(2,'0')}:${String(emm).padStart(2,'0')}`;
         placeholders.push({ start, end, description: '', category: '', missing: true });
+        placeholderStarts.add(start);
       }
     }
+
+    // Also include live pending slots for this day so notification-triggered slots
+    // appear immediately, even before the minute ticker catches up.
+    const pendingForDay = this.pendingSlotsForDay();
+    for (const slot of pendingForDay) {
+      const start = slot.slice(11, 16);
+      if (!start || placeholderStarts.has(start)) continue;
+      const [sh, sm] = start.split(':').map(Number);
+      const startMins = sh * 60 + sm;
+      if (covered.has(startMins)) continue;
+      const endMin = startMins + slotMinutes;
+      const eh = Math.floor(endMin / 60), emm = endMin % 60;
+      const end = `${String(eh).padStart(2,'0')}:${String(emm).padStart(2,'0')}`;
+      placeholders.push({ start, end, description: '', category: '', missing: true });
+      placeholderStarts.add(start);
+    }
+
     // Merge & sort
     const merged = [...list, ...placeholders].sort((a:any,b:any)=> a.start.localeCompare(b.start));
     return merged;
   });
+
+  missingSlotKeys = computed(() => {
+    const day = this.day();
+    if (!day) return [] as string[];
+    return this.rows()
+      .filter(r => !!r?.missing)
+      .map(r => `${day}T${r.start}`);
+  });
+
+  allMissingSelected = computed(() => {
+    const missing = this.missingSlotKeys();
+    const selected = this.selectedMissingSlots();
+    return missing.length > 0 && missing.every(s => selected.includes(s));
+  });
+
+  selectedMissingCount = computed(() => this.selectedMissingSlots().length);
 
   // Ordered categories using same logic as summary (group declaration order then extras)
   orderedCategories = computed(() => {
@@ -187,14 +235,22 @@ export class DayViewComponent implements OnDestroy {
 
   // React to route param changes
   private routeEffect = effect(() => {
-    this.route.paramMap.subscribe(pm => {
-      const ymd = pm.get('ymd') ?? this.clock.today();
-      // Only trigger load if changed
-      if (this.day() !== ymd) {
-        this.day.set(ymd);
-        this.ipc.loadDay(ymd);
-      }
-    });
+    const pm = this.routeParamMap();
+    const routeYmd = pm.get('ymd');
+    this.isTodayView.set(!routeYmd);
+    const ymd = routeYmd ?? this.clock.today();
+    // Only trigger load if changed
+    if (this.day() !== ymd) {
+      this.day.set(ymd);
+      this.ipc.loadDay(ymd);
+    }
+  });
+
+  private pruneSelectionEffect = effect(() => {
+    const missing = new Set(this.missingSlotKeys());
+    const selected = this.selectedMissingSlots();
+    const next = selected.filter(s => missing.has(s));
+    if (next.length !== selected.length) this.selectedMissingSlots.set(next);
   });
 
   private onPointerDown = (ev: PointerEvent) => {
@@ -219,6 +275,38 @@ export class DayViewComponent implements OnDestroy {
     this.ipc.deleteEntry(e.day, e.start);
   }
 
+  isMissingSelected(start: string) {
+    const day = this.day();
+    if (!day || !start) return false;
+    return this.selectedMissingSlots().includes(`${day}T${start}`);
+  }
+
+  toggleMissingSelection(start: string) {
+    const day = this.day();
+    if (!day || !start) return;
+    const key = `${day}T${start}`;
+    const set = new Set(this.selectedMissingSlots());
+    set.has(key) ? set.delete(key) : set.add(key);
+    this.selectedMissingSlots.set(Array.from(set).sort());
+  }
+
+  toggleAllMissingSelection() {
+    if (this.allMissingSelected()) this.selectedMissingSlots.set([]);
+    else this.selectedMissingSlots.set([...this.missingSlotKeys()].sort());
+  }
+
+  logSelectedMissing() {
+    const selected = this.selectedMissingSlots();
+    if (!selected.length) return;
+    const currentPending = new Set(this.ipc.pendingSlots());
+    for (const s of selected) currentPending.add(s);
+    this.ipc.pendingSlots.set(Array.from(currentPending).sort());
+    this.ipc.preselectedSlots.set([...selected].sort());
+    try {
+      window.dispatchEvent(new CustomEvent('open-log-dialog', { detail: { slots: selected } }));
+    } catch { /* ignore */ }
+  }
+
   /** Add a missing slot to the pending list & open the log dialog pre-selecting it. */
   logMissing(start: string) {
     const day = this.day();
@@ -227,6 +315,7 @@ export class DayViewComponent implements OnDestroy {
     // Ensure pendingSlots signal includes it so dialog can select it.
     const current = this.ipc.pendingSlots();
     if (!current.includes(slotKey)) this.ipc.pendingSlots.set([...current, slotKey].sort());
+    this.ipc.preselectedSlots.set([slotKey]);
     // Set prompt slot so LogDialog can auto-select it
     try { this.ipc.lastPromptSlot.set(slotKey); } catch { /* ignore */ }
     // Dispatch custom event listened by AppComponent to open dialog.
@@ -250,7 +339,7 @@ export class DayViewComponent implements OnDestroy {
 }
 
 // Pure helper used for tests (reuses logic above without signals)
-export function computeMissingRows(entries: { start:string; end:string; description?:string; category?:string }[], settings: { work_start:string; work_end:string; slot_minutes:number }, day: string, now: Date): any[] {
+export function computeMissingRows(entries: { start:string; end:string; description?:string; category?:string }[], settings: { work_start:string; work_end:string; slot_minutes:number }, day: string, nowMinutesSinceMidnight: number): any[] {
   if (!day || !settings) return entries;
   const slotMinutes = Number(settings.slot_minutes) || 15;
   const [wsh,wsm] = settings.work_start.split(':').map(Number);
@@ -266,12 +355,9 @@ export function computeMissingRows(entries: { start:string; end:string; descript
     if (ee <= es) continue;
     for (let m = es; m < ee; m += slotMinutes) if (m % slotMinutes === 0) covered.add(m);
   }
-  let nowLimitM = Infinity;
-  const ymdNow = now.toISOString().slice(0,10);
-  if (day === ymdNow) nowLimitM = now.getHours()*60 + now.getMinutes();
   const placeholders: any[] = [];
   for (let m = startM; m < endM; m += slotMinutes) {
-    if (m >= nowLimitM) break;
+    if (m >= nowMinutesSinceMidnight) break;
     if (!covered.has(m)) {
       const h = Math.floor(m/60), mm = m%60;
       const start = `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
