@@ -230,6 +230,50 @@ export class DayViewComponent implements OnDestroy {
     return { ...d, weekday: this.weekdayNames[dt.getDay()], exported };
   }));
 
+  currentMonthKey = computed(() => this.clock.today().slice(0, 7));
+  currentYearKey = computed(() => this.clock.today().slice(0, 4));
+  expandedMonths = signal<string[]>([]);
+  expandedYears = signal<string[]>([]);
+  private monthAccordionInitialized = signal(false);
+  private yearAccordionInitialized = signal(false);
+
+  daysByMonth = computed(() => {
+    const sorted = [...this.daysWithWeekday()].sort((a, b) => b.day.localeCompare(a.day));
+    const groups = new Map<string, { key: string; label: string; days: typeof sorted }>();
+    for (const d of sorted) {
+      const key = d.day.slice(0, 7); // YYYY-MM
+      if (!groups.has(key)) {
+        const [y, m] = key.split('-').map(Number);
+        const label = new Date(y, (m || 1) - 1, 1).toLocaleDateString('da-DK', {
+          month: 'long',
+          year: 'numeric'
+        });
+        groups.set(key, { key, label, days: [] });
+      }
+      groups.get(key)!.days.push(d);
+    }
+    return Array.from(groups.values());
+  });
+
+  daysByYear = computed(() => {
+    const months = this.daysByMonth();
+    const groups = new Map<string, { key: string; label: string; isPreviousYear: boolean; months: typeof months }>();
+    const currentYear = this.currentYearKey();
+    for (const month of months) {
+      const yearKey = month.key.slice(0, 4);
+      if (!groups.has(yearKey)) {
+        groups.set(yearKey, {
+          key: yearKey,
+          label: yearKey,
+          isPreviousYear: Number(yearKey) < Number(currentYear),
+          months: []
+        });
+      }
+      groups.get(yearKey)!.months.push(month);
+    }
+    return Array.from(groups.values()).sort((a, b) => b.key.localeCompare(a.key));
+  });
+
   // Optional computed: count of entries (could drive badge etc.)
   entryCount = computed(() => this.entries().length);
 
@@ -251,6 +295,34 @@ export class DayViewComponent implements OnDestroy {
     const selected = this.selectedMissingSlots();
     const next = selected.filter(s => missing.has(s));
     if (next.length !== selected.length) this.selectedMissingSlots.set(next);
+  });
+
+  private keepCurrentMonthExpandedEffect = effect(() => {
+    const groups = this.daysByMonth();
+    const keys = new Set(groups.map(g => g.key));
+    const current = this.currentMonthKey();
+    const initialized = this.monthAccordionInitialized();
+    this.expandedMonths.update(prev => prev.filter(k => keys.has(k)));
+
+    if (!initialized && groups.length) {
+      const initialOpen = keys.has(current) ? [current] : [groups[0].key];
+      this.expandedMonths.set(initialOpen);
+      this.monthAccordionInitialized.set(true);
+    }
+  });
+
+  private initializeYearAccordionEffect = effect(() => {
+    const years = this.daysByYear();
+    const keys = new Set(years.map(y => y.key));
+    const current = this.currentYearKey();
+    const initialized = this.yearAccordionInitialized();
+    this.expandedYears.update(prev => prev.filter(k => keys.has(k)));
+
+    if (!initialized && years.length) {
+      const initialOpen = keys.has(current) ? [current] : [years[0].key];
+      this.expandedYears.set(initialOpen);
+      this.yearAccordionInitialized.set(true);
+    }
   });
 
   private onPointerDown = (ev: PointerEvent) => {
@@ -335,6 +407,34 @@ export class DayViewComponent implements OnDestroy {
     if (!day) return;
     const current = this.ipc.dayExported().get(day) || false;
     this.ipc.setDayExported(day, !current);
+  }
+
+  isMonthExpanded(monthKey: string) {
+    return this.expandedMonths().includes(monthKey);
+  }
+
+  toggleMonth(monthKey: string) {
+    if (!monthKey) return;
+    this.expandedMonths.update(prev => {
+      const set = new Set(prev);
+      if (set.has(monthKey)) set.delete(monthKey);
+      else set.add(monthKey);
+      return Array.from(set);
+    });
+  }
+
+  isYearExpanded(yearKey: string) {
+    return this.expandedYears().includes(yearKey);
+  }
+
+  toggleYear(yearKey: string) {
+    if (!yearKey) return;
+    this.expandedYears.update(prev => {
+      const set = new Set(prev);
+      if (set.has(yearKey)) set.delete(yearKey);
+      else set.add(yearKey);
+      return Array.from(set);
+    });
   }
 }
 

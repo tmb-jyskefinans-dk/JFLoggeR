@@ -307,6 +307,7 @@ function importExternalLines(raw) {
     let skipped = 0;
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        let importedForLine = 0;
         let obj;
         try {
             obj = JSON.parse(line);
@@ -358,11 +359,15 @@ function importExternalLines(raw) {
             const catRaw = typeof category === 'string' ? category.trim() : '';
             const cat = catRaw || 'Import';
             imported.push({ day, start: startHM, end: endHM, description: String(task), category: cat, created_at: new Date().toISOString() });
+            importedForLine++;
             cursor = slotEnd;
         }
-        if (imported.length === 0 && intervalMinutes < slotMinutes) {
-            // Too small interval < slot granularity
-            details.push({ line: i + 1, reason: 'Interval shorter than slot granularity – ignored' });
+        if (importedForLine === 0) {
+            // Line parsed but did not contain a full slot interval.
+            const reason = intervalMinutes < slotMinutes
+                ? 'Interval shorter than slot granularity – ignored'
+                : 'No full slot intervals found within segment – ignored';
+            details.push({ line: i + 1, reason });
             skipped++;
         }
     }

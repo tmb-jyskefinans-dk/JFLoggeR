@@ -36,13 +36,13 @@
     <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-slate-600 dark:text-slate-300">Tenant ID</label>
-        <input type="text" [ngModel]="azureTenantId()" (ngModelChange)="azureTenantId.set($event)" name="azure_tenant_id"
+        <input type="text" [formControl]="settingsForm.controls.azure_tenant_id"
           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
           class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
       </div>
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-slate-600 dark:text-slate-300">Client ID</label>
-        <input type="text" [ngModel]="azureClientId()" (ngModelChange)="azureClientId.set($event)" name="azure_client_id"
+        <input type="text" [formControl]="settingsForm.controls.azure_client_id"
           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
           class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
       </div>
@@ -65,18 +65,18 @@
       }
     </div>
   } @else {
-    <form class="grid grid-cols-1 md:grid-cols-3 gap-5" novalidate>
+    <form class="grid grid-cols-1 md:grid-cols-3 gap-5" [formGroup]="settingsForm" novalidate>
       <div class="flex flex-col gap-1">
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde start</label>
-  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [ngModel]="workStart()" (ngModelChange)="workStart.set($event)" name="work_start" required>
+  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" formControlName="work_start" required>
       </div>
       <div class="flex flex-col gap-1">
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde slut</label>
-  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" [ngModel]="workEnd()" (ngModelChange)="workEnd.set($event)" name="work_end" required>
+  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" formControlName="work_end" required>
       </div>
       <div class="flex flex-col gap-1">
   <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Intervallængde (minutter)</label>
-  <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" [ngModel]="slotMinutes()" (ngModelChange)="slotMinutes.set($event)" name="slot_minutes" required>
+  <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" formControlName="slot_minutes" required>
           @for(m of [1,5,10,15,20,30,60]; track m) { <option [value]="m">{{m}}</option> }
         </select>
       </div>
@@ -96,7 +96,7 @@
 
       <div class="md:col-span-3 flex items-start gap-3 mt-2">
         <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="includeActiveSlot()" (ngModelChange)="includeActiveSlot.set($event)" name="include_active_slot" aria-describedby="include-active-help">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="include_active_slot" aria-describedby="include-active-help">
           <span class="leading-tight">
             Inkludér aktivt interval i "Log nu"
             <span id="include-active-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Når slået til kan et igangværende interval logges med det samme, også hvis du er startet tidligere end normal starttid.</span>
@@ -106,7 +106,7 @@
 
       <div class="md:col-span-3 flex items-start gap-3 mt-2">
         <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="autoFocusOnSlot()" (ngModelChange)="autoFocusOnSlot.set($event)" name="auto_focus_on_slot" aria-describedby="auto-focus-help">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_focus_on_slot" aria-describedby="auto-focus-help">
           <span class="leading-tight">
             Bring vinduet i front og åbn logdialogen automatisk når et nyt interval starter
             <span id="auto-focus-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for aktiv/påtrængende påmindelse. Deaktiver hvis du kun ønsker passive notifikationer.</span>
@@ -116,7 +116,7 @@
 
       <div class="md:col-span-3 flex items-start gap-3">
         <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="notificationSilent()" (ngModelChange)="notificationSilent.set($event)" name="notification_silent" aria-describedby="notif-silent-help">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="notification_silent" aria-describedby="notif-silent-help">
           <span class="leading-tight">
             Stille notifikationer (ingen lyd)
             <span id="notif-silent-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Fjern markering for at tillade systemlyd når et nyt interval er klar.</span>
@@ -126,14 +126,14 @@
 
       <div class="md:col-span-3 flex flex-col gap-2 mt-2">
         <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Stale interval tærskel (minutter)</label>
-  <input type="number" min="1" [ngModel]="staleThresholdMinutes()" (ngModelChange)="staleThresholdMinutes.set($event ? +$event : staleThresholdMinutes())" name="stale_threshold_minutes"
+  <input type="number" min="1" formControlName="stale_threshold_minutes"
           class="w-40 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" aria-describedby="stale-help" />
   <p id="stale-help" class="text-xs text-slate-500 dark:text-slate-400">Når et ulogget interval overstiger denne grænse, vises en påmindelse om at registrere tiden.</p>
       </div>
 
       <div class="md:col-span-3 flex items-start gap-3">
         <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="autoStartOnLogin()" (ngModelChange)="autoStartOnLogin.set($event)" name="auto_start_on_login" aria-describedby="auto-start-help">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_start_on_login" aria-describedby="auto-start-help">
           <span class="leading-tight">
             Start automatisk ved login
             <span id="auto-start-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for at starte appen når du logger ind på systemet.</span>
@@ -143,7 +143,7 @@
 
       <div class="md:col-span-3 flex items-start gap-3">
         <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" [ngModel]="groupNotifications()" (ngModelChange)="groupNotifications.set($event)" name="group_notifications" aria-describedby="group-notif-help">
+          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="group_notifications" aria-describedby="group-notif-help">
           <span class="leading-tight">
             Gruppér notifikationer når væk
             <span id="group-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Akkumuler flere intervaller til én opsummering hvis du er væk fra computeren.</span>
@@ -173,7 +173,7 @@
       <div class="md:col-span-3 mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
   {{totalWorkMinutes()}} minutter planlagt • ca. {{ (totalWorkMinutes()/60) | number:'1.2-2' }} timer
-        • ca. {{ (totalWorkMinutes() / slotMinutes()) | number:'1.0-0' }} logposter pr. dag
+        • ca. {{ (totalWorkMinutes() / settingsForm.controls.slot_minutes.value) | number:'1.0-0' }} logposter pr. dag
       </div>
     </form>
   }
@@ -182,7 +182,7 @@
 <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 shadow-sm p-6 max-w-4xl mx-auto mt-8 text-slate-700 dark:text-slate-200">
   <h3 class="text-lg font-semibold tracking-tight mb-2 text-slate-900 dark:text-slate-100">Importér eksterne registreringer</h3>
   <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Indsæt én JSON pr. linje med felterne <code>entry_id, task, segment_start, segment_end, minutes</code>. Intervaller udvides til hele slots ({{ipc.settings()?.slot_minutes}} min). Delvise rester ignoreres.</p>
-  <textarea [ngModel]="importText()" (ngModelChange)="importText.set($event)" rows="6" placeholder='{"entry_id":"id","task":"Beskrivelse","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15}'
+  <textarea [value]="importText()" (input)="importText.set($any($event.target).value)" rows="6" placeholder='{"entry_id":"id","task":"Beskrivelse","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15}'
     class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"></textarea>
   <div class="mt-3 flex gap-2">
     <button type="button" (click)="performImport()" [disabled]="!importText().trim() || importing()" class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-9 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">

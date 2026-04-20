@@ -1,33 +1,56 @@
 import { Component, inject, ChangeDetectionStrategy, effect, signal, computed } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
 import { IpcService } from '../../services/ipc.service';
-import { FormsModule } from '@angular/forms';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 
 @Component({
   selector: 'settings-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe],
+  imports: [ReactiveFormsModule, DecimalPipe],
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss']
 })
 export class SettingsComponent {
   ipc = inject(IpcService);
   theme = inject(ThemeService);
+  private fb = inject(FormBuilder);
 
-  // Signals replacing primitive fields
-  workStart = signal<string>('08:00');
-  workEnd = signal<string>('16:00');
-  slotMinutes = signal<number>(15);
-  weekdayState = signal<boolean[]>([false, true, true, true, true, true, false]);
-  includeActiveSlot = signal<boolean>(true);
-  azureTenantId = signal<string>('');
-  azureClientId = signal<string>('');
-  autoFocusOnSlot = signal<boolean>(false);
-  notificationSilent = signal<boolean>(true);
-  staleThresholdMinutes = signal<number>(45);
-  autoStartOnLogin = signal<boolean>(false);
-  groupNotifications = signal<boolean>(true);
+  private readonly weekdayControlNames = [
+    'weekday_0',
+    'weekday_1',
+    'weekday_2',
+    'weekday_3',
+    'weekday_4',
+    'weekday_5',
+    'weekday_6'
+  ] as const;
+
+  settingsForm = this.fb.nonNullable.group({
+    work_start: '08:00',
+    work_end: '16:00',
+    slot_minutes: 15,
+    weekday_0: false,
+    weekday_1: true,
+    weekday_2: true,
+    weekday_3: true,
+    weekday_4: true,
+    weekday_5: true,
+    weekday_6: false,
+    include_active_slot: true,
+    azure_tenant_id: '',
+    azure_client_id: '',
+    auto_focus_on_slot: false,
+    notification_silent: true,
+    stale_threshold_minutes: 45,
+    auto_start_on_login: false,
+    group_notifications: true
+  });
+
+  private settingsValue = toSignal(this.settingsForm.valueChanges, {
+    initialValue: this.settingsForm.getRawValue()
+  });
 
   authBusy = signal<boolean>(false);
   authError = signal<string>('');
@@ -41,10 +64,16 @@ export class SettingsComponent {
   days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   initialSettings = signal<any|null>(null);
 
+  weekdayState = computed(() => {
+    const v = this.settingsValue();
+    return this.weekdayControlNames.map(name => !!v[name]);
+  });
+
   // Derived signals
   totalWorkMinutes = computed(() => {
-    const startParts = this.workStart().split(':').map(Number);
-    const endParts = this.workEnd().split(':').map(Number);
+    const v = this.settingsValue();
+    const startParts = (v.work_start || '').split(':').map(Number);
+    const endParts = (v.work_end || '').split(':').map(Number);
     if (startParts.length < 2 || endParts.length < 2) return 0;
     const startM = startParts[0]*60 + startParts[1];
     const endM = endParts[0]*60 + endParts[1];
@@ -55,20 +84,21 @@ export class SettingsComponent {
   changed = computed(() => {
     const s = this.initialSettings();
     if (!s) return false;
+      const v = this.settingsValue();
     const maskOrig = s.weekdays_mask;
-    const maskNow = this.weekdayState().reduce((acc,on,i)=> on? acc | (1<<i): acc,0);
-    return s.work_start !== this.workStart() ||
-           s.work_end !== this.workEnd() ||
-           s.slot_minutes !== this.slotMinutes() ||
+      const maskNow = this.weekdayControlNames.reduce((acc, name, i) => v[name] ? acc | (1 << i) : acc, 0);
+      return s.work_start !== v.work_start ||
+        s.work_end !== v.work_end ||
+        Number(s.slot_minutes) !== Number(v.slot_minutes) ||
            maskOrig !== maskNow ||
-           ((s.include_active_slot !== false) !== this.includeActiveSlot()) ||
-           ((s.azure_tenant_id ?? '') !== this.azureTenantId()) ||
-           ((s.azure_client_id ?? '') !== this.azureClientId()) ||
-           (!!s.auto_focus_on_slot !== this.autoFocusOnSlot()) ||
-           (!!s.notification_silent !== this.notificationSilent()) ||
-           (Number(s.stale_threshold_minutes) !== this.staleThresholdMinutes()) ||
-           (!!s.auto_start_on_login !== this.autoStartOnLogin()) ||
-           (!!s.group_notifications !== this.groupNotifications());
+        ((s.include_active_slot !== false) !== !!v.include_active_slot) ||
+        ((s.azure_tenant_id ?? '') !== (v.azure_tenant_id ?? '')) ||
+        ((s.azure_client_id ?? '') !== (v.azure_client_id ?? '')) ||
+        (!!s.auto_focus_on_slot !== !!v.auto_focus_on_slot) ||
+        (!!s.notification_silent !== !!v.notification_silent) ||
+        (Number(s.stale_threshold_minutes) !== Number(v.stale_threshold_minutes)) ||
+        (!!s.auto_start_on_login !== !!v.auto_start_on_login) ||
+        (!!s.group_notifications !== !!v.group_notifications);
   });
 
   constructor() {
@@ -83,35 +113,44 @@ export class SettingsComponent {
   }
 
   apply(s: any) {
-    this.workStart.set(s.work_start);
-    this.workEnd.set(s.work_end);
-    this.slotMinutes.set(s.slot_minutes);
-    this.weekdayState.set(Array.from({length:7},(_,i)=> (s.weekdays_mask & (1<<i))!==0));
-    this.includeActiveSlot.set(s.include_active_slot !== false);
-    this.azureTenantId.set(s.azure_tenant_id ?? '');
-    this.azureClientId.set(s.azure_client_id ?? '');
-    this.autoFocusOnSlot.set(!!s.auto_focus_on_slot);
-    this.notificationSilent.set(!!s.notification_silent);
-    this.staleThresholdMinutes.set(Number(s.stale_threshold_minutes) || 45);
-    this.autoStartOnLogin.set(!!s.auto_start_on_login);
-    this.groupNotifications.set(!!s.group_notifications);
+    this.settingsForm.patchValue({
+      work_start: s.work_start,
+      work_end: s.work_end,
+      slot_minutes: Number(s.slot_minutes) || 15,
+      weekday_0: (s.weekdays_mask & (1 << 0)) !== 0,
+      weekday_1: (s.weekdays_mask & (1 << 1)) !== 0,
+      weekday_2: (s.weekdays_mask & (1 << 2)) !== 0,
+      weekday_3: (s.weekdays_mask & (1 << 3)) !== 0,
+      weekday_4: (s.weekdays_mask & (1 << 4)) !== 0,
+      weekday_5: (s.weekdays_mask & (1 << 5)) !== 0,
+      weekday_6: (s.weekdays_mask & (1 << 6)) !== 0,
+      include_active_slot: s.include_active_slot !== false,
+      azure_tenant_id: s.azure_tenant_id ?? '',
+      azure_client_id: s.azure_client_id ?? '',
+      auto_focus_on_slot: !!s.auto_focus_on_slot,
+      notification_silent: !!s.notification_silent,
+      stale_threshold_minutes: Number(s.stale_threshold_minutes) || 45,
+      auto_start_on_login: !!s.auto_start_on_login,
+      group_notifications: !!s.group_notifications
+    });
   }
 
   async save() {
-    const weekdays_mask = this.weekdayState().reduce((acc, on, i)=> on? acc | (1<<i): acc, 0);
+    const raw = this.settingsForm.getRawValue();
+    const weekdays_mask = this.weekdayControlNames.reduce((acc, name, i) => raw[name] ? acc | (1 << i) : acc, 0);
     const payload = {
-      work_start: this.workStart(),
-      work_end: this.workEnd(),
-      slot_minutes: Number(this.slotMinutes()),
+      work_start: raw.work_start,
+      work_end: raw.work_end,
+      slot_minutes: Number(raw.slot_minutes),
       weekdays_mask,
-      include_active_slot: this.includeActiveSlot(),
-      azure_tenant_id: this.azureTenantId().trim(),
-      azure_client_id: this.azureClientId().trim(),
-      auto_focus_on_slot: this.autoFocusOnSlot(),
-      notification_silent: this.notificationSilent(),
-      stale_threshold_minutes: Number(this.staleThresholdMinutes()),
-      auto_start_on_login: this.autoStartOnLogin(),
-      group_notifications: this.groupNotifications()
+      include_active_slot: raw.include_active_slot,
+      azure_tenant_id: raw.azure_tenant_id.trim(),
+      azure_client_id: raw.azure_client_id.trim(),
+      auto_focus_on_slot: raw.auto_focus_on_slot,
+      notification_silent: raw.notification_silent,
+      stale_threshold_minutes: Number(raw.stale_threshold_minutes),
+      auto_start_on_login: raw.auto_start_on_login,
+      group_notifications: raw.group_notifications
     };
     try {
       await this.ipc.saveSettings(payload);
@@ -128,11 +167,10 @@ export class SettingsComponent {
   }
 
   toggleWeekday(i: number) {
-    this.weekdayState.update(arr => {
-      const copy = [...arr];
-      copy[i] = !copy[i];
-      return copy;
-    });
+    const key = this.weekdayControlNames[i];
+    if (!key) return;
+    const ctrl = this.settingsForm.controls[key];
+    ctrl.setValue(!ctrl.value);
   }
 
   async signInMicrosoft() {

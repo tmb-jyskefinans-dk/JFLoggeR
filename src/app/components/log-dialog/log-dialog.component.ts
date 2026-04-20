@@ -2,6 +2,7 @@ import { Component, OnInit, AfterViewInit, inject, signal, ChangeDetectionStrate
 import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
 import { IpcService } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
+import { preserveCategoryDescriptions } from '../shared/category-description.util';
 
 @Component({
   selector: 'log-dialog',
@@ -37,13 +38,13 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     const selected = this.selectedSlots();
     return all.length > 0 && selected.length === all.length && all.every(s => selected.includes(s));
   });
-  description = '';
-  category = '';
-  andetDescription = '';
+  description = signal('');
+  category = signal('');
+  andetDescription = signal('');
   // Suggestion feature removed; keeping component lean.
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
   unmatchedCategory(): boolean {
-    const c = this.category?.trim();
+    const c = this.category().trim();
     if (!c) return false;
     return !this.categoryGroups.some(g => g.items.includes(c));
   }
@@ -103,36 +104,42 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     const [desc, cat] = v.split('||');
     // If preset category is 'Andet', route description into andetDescription field
     if (cat === 'Andet') {
-      this.category = 'Andet';
+      this.category.set('Andet');
       if (desc) {
-        this.andetDescription = desc;
-        this.description = ''; // clear primary description to avoid stale content
+        this.andetDescription.set(desc);
+        this.description.set(''); // clear primary description to avoid stale content
       }
     } else {
-      if (desc) this.description = desc;
-      if (cat) this.category = cat;
+      if (desc) this.description.set(desc);
+      if (cat) this.category.set(cat);
       // Clear special field when leaving 'Andet'
-      if (this.category !== 'Andet') this.andetDescription = '';
+      if (this.category() !== 'Andet') this.andetDescription.set('');
     }
   }
   async submit() {
     const slots = this.selectedSlots();
-    const category = this.category.trim();
-    const baseDescription = this.description.trim();
-    const otherDescription = this.andetDescription.trim();
+    const category = this.category().trim();
+    const baseDescription = this.description().trim();
+    const otherDescription = this.andetDescription().trim();
     let finalDescription = category === 'Andet' ? otherDescription : baseDescription;
     if (!slots.length || !category || !finalDescription) return;
-    await this.ipc.submitPending(slots, finalDescription, this.category);
+    await this.ipc.submitPending(slots, finalDescription, category);
     // Derive affected day from first slot and trigger reload of day & summary signals
     if (slots.length) {
       const day = slots[0].split('T')[0];
       this.ipc.loadDay(day);
     }
-    this.description = '';
-    this.category = '';
-    this.andetDescription = '';
+    this.description.set('');
+    this.category.set('');
+    this.andetDescription.set('');
     this.selectedSlots.set([]);
     this.closed.emit();
+  }
+
+  onCategoryChange(nextCategory: string) {
+    const next = preserveCategoryDescriptions(nextCategory, this.description(), this.andetDescription());
+    this.description.set(next.description);
+    this.andetDescription.set(next.andetDescription);
   }
 
   // Removed suggestion-related methods (refreshSuggestion, applySuggestion, applyWeakMatch).
@@ -152,3 +159,4 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   // React to description changes for suggestions (simple polling via effect over primitive fields)
   // Suggestion effect removed.
 }
+

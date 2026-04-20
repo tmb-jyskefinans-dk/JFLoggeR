@@ -35,12 +35,43 @@ function writeLog(level, message, meta) {
     }
     catch (e) { /* last-chance; avoid throwing in logger */ }
 }
+let fatalShutdownInProgress = false;
+function handleFatalProcessError(kind, error) {
+    const err = error;
+    writeLog(kind, err?.message || String(error), {
+        stack: err?.stack,
+        reason: kind === 'unhandledRejection' ? error : undefined
+    });
+    // Prevent duplicate shutdown attempts when multiple fatal errors arrive.
+    if (fatalShutdownInProgress)
+        return;
+    fatalShutdownInProgress = true;
+    try {
+        win?.webContents.send('app:fatal-error', { kind, message: err?.message || String(error) });
+    }
+    catch { }
+    if (!electron_1.app.isPackaged) {
+        // Keep development sessions alive for faster debugging after logging the failure.
+        fatalShutdownInProgress = false;
+        return;
+    }
+    setTimeout(() => {
+        try {
+            electron_1.app.exit(1);
+        }
+        catch { }
+    }, 1500);
+    try {
+        electron_1.app.quit();
+    }
+    catch { }
+}
 // Capture process-level failures early
 process.on('uncaughtException', (err) => {
-    writeLog('uncaughtException', err?.message || String(err), { stack: err?.stack });
+    handleFatalProcessError('uncaughtException', err);
 });
 process.on('unhandledRejection', (reason) => {
-    writeLog('unhandledRejection', typeof reason === 'string' ? reason : (reason?.message || 'promise rejection'), { reason });
+    handleFatalProcessError('unhandledRejection', reason);
 });
 const db_1 = require("./db");
 const stale_1 = require("./stale");
