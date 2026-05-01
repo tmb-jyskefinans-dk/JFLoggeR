@@ -34,7 +34,8 @@ const DEFAULT_SETTINGS = {
     notification_silent: true,
     stale_threshold_minutes: 45,
     auto_start_on_login: false,
-    group_notifications: true
+    group_notifications: true,
+    minimize_after_notification_submit: false
 };
 let db;
 function sanitizeSlotMinutes(value) {
@@ -109,6 +110,10 @@ function initDb() {
             db.data.settings.group_notifications = DEFAULT_SETTINGS.group_notifications;
             changed = true;
         }
+        if (typeof db.data.settings.minimize_after_notification_submit !== 'boolean') {
+            db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit;
+            changed = true;
+        }
     }
     if (typeof db.data._seq !== 'number') {
         db.data._seq = 1;
@@ -146,7 +151,8 @@ function saveSettings(s) {
         notification_silent: !!s.notification_silent,
         stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes,
         auto_start_on_login: !!s.auto_start_on_login,
-        group_notifications: !!s.group_notifications
+        group_notifications: !!s.group_notifications,
+        minimize_after_notification_submit: !!s.minimize_after_notification_submit
     };
     db.write();
 }

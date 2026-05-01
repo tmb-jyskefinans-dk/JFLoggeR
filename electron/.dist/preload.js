@@ -53,7 +53,7 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
         return () => electron_1.ipcRenderer.removeListener('navigate:today', handler);
     },
     onDialogOpenLog: (cb) => {
-        const handler = (_e, d) => cb(d?.slot);
+        const handler = (_e, d) => cb(d ?? {});
         electron_1.ipcRenderer.on('dialog:open-log', handler);
         return () => electron_1.ipcRenderer.removeListener('dialog:open-log', handler);
     },

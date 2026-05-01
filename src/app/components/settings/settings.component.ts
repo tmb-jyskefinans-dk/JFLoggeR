@@ -45,7 +45,8 @@ export class SettingsComponent {
     notification_silent: true,
     stale_threshold_minutes: 45,
     auto_start_on_login: false,
-    group_notifications: true
+    group_notifications: true,
+    minimize_after_notification_submit: false
   });
 
   private settingsValue = toSignal(this.settingsForm.valueChanges, {
@@ -98,7 +99,8 @@ export class SettingsComponent {
         (!!s.notification_silent !== !!v.notification_silent) ||
         (Number(s.stale_threshold_minutes) !== Number(v.stale_threshold_minutes)) ||
         (!!s.auto_start_on_login !== !!v.auto_start_on_login) ||
-        (!!s.group_notifications !== !!v.group_notifications);
+          (!!s.group_notifications !== !!v.group_notifications) ||
+          (!!s.minimize_after_notification_submit !== !!v.minimize_after_notification_submit);
   });
 
   constructor() {
@@ -131,7 +133,8 @@ export class SettingsComponent {
       notification_silent: !!s.notification_silent,
       stale_threshold_minutes: Number(s.stale_threshold_minutes) || 45,
       auto_start_on_login: !!s.auto_start_on_login,
-      group_notifications: !!s.group_notifications
+      group_notifications: !!s.group_notifications,
+      minimize_after_notification_submit: !!s.minimize_after_notification_submit
     });
   }
 
@@ -150,7 +153,8 @@ export class SettingsComponent {
       notification_silent: raw.notification_silent,
       stale_threshold_minutes: Number(raw.stale_threshold_minutes),
       auto_start_on_login: raw.auto_start_on_login,
-      group_notifications: raw.group_notifications
+      group_notifications: raw.group_notifications,
+      minimize_after_notification_submit: raw.minimize_after_notification_submit
     };
     try {
       await this.ipc.saveSettings(payload);

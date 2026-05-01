@@ -254,9 +254,9 @@ function showDigestNotification() {
             }
             catch { }
             // Open prompt for earliest slot captured at notification creation time.
-            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(firstSlot) });
+            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(firstSlot), source: 'notification' });
             // Force open dialog even if slot was previously handled so user can re-log or review.
-            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(firstSlot) });
+            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(firstSlot), source: 'notification' });
         }
     });
     n.show();
@@ -295,9 +295,9 @@ function notifyForSlot(slot) {
             }
             catch { }
             console.log('[main] notification click -> prompt:open', (0, time_1.slotKey)(slot));
-            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
+            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
             // Also force dialog open regardless of prior handled state.
-            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot) });
+            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
         }
         else {
             console.warn('[main] notification clicked but window is null');
@@ -384,7 +384,7 @@ function scheduleTicker() {
                         }
                         catch { }
                         console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
-                        win?.webContents.send('prompt:open', { slot: key });
+                        win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
                     }
                 }
             }
@@ -421,8 +421,8 @@ function scheduleStaleCheck() {
                             win.focus();
                         }
                         catch { }
-                        win?.webContents.send('prompt:open', { slot: result.key });
-                        win?.webContents.send('dialog:open-log', { slot: result.key });
+                        win?.webContents.send('prompt:open', { slot: result.key, source: 'notification' });
+                        win?.webContents.send('dialog:open-log', { slot: result.key, source: 'notification' });
                     }
                 });
                 n.show();
@@ -710,6 +710,12 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
     }
     catch { }
     updateTrayTooltip();
+    if (payload?.minimizeWindowAfterSubmit) {
+        try {
+            win?.minimize();
+        }
+        catch { }
+    }
     return { ok: true };
 });
 // Debug notification trigger (manual test without waiting for scheduler)
@@ -721,8 +727,8 @@ electron_1.ipcMain.handle('debug:notify', (_e, opts) => {
     n.on('click', () => {
         win?.show();
         win?.focus();
-        win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
-        win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot) });
+        win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
+        win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
     });
     n.show();
     return { ok: true };
@@ -788,8 +794,8 @@ electron_1.app.whenReady().then(() => {
                         const prev = (0, time_1.previousSlotStart)(new Date());
                         const key = (0, time_1.slotKey)(prev);
                         // Emit both prompt (for selection logic) and a manual dialog open event that bypasses handledPromptSlot gating.
-                        win?.webContents.send('prompt:open', { slot: key });
-                        win?.webContents.send('dialog:open-log', { slot: key });
+                        win?.webContents.send('prompt:open', { slot: key, source: 'tray' });
+                        win?.webContents.send('dialog:open-log', { slot: key, source: 'tray' });
                     }
                 },
                 {

@@ -28,6 +28,7 @@ export type Settings = {
   stale_threshold_minutes?: number; // minutes beyond slot length before stale prompt
   auto_start_on_login?: boolean; // launch app on OS login
   group_notifications?: boolean; // consolidate missed notifications when away
+  minimize_after_notification_submit?: boolean; // minimize app after logging from notification-opened dialog
 };
 
 type Data = {
@@ -49,7 +50,8 @@ const DEFAULT_SETTINGS: Settings = {
   notification_silent: true,
   stale_threshold_minutes: 45,
   auto_start_on_login: false,
-  group_notifications: true
+  group_notifications: true,
+  minimize_after_notification_submit: false
 };
 
 let db: LowSync<Data>;
@@ -114,6 +116,7 @@ export function initDb() {
     if (typeof db.data.settings.stale_threshold_minutes !== 'number') { db.data.settings.stale_threshold_minutes = DEFAULT_SETTINGS.stale_threshold_minutes!; changed = true; }
     if (typeof db.data.settings.auto_start_on_login !== 'boolean') { db.data.settings.auto_start_on_login = DEFAULT_SETTINGS.auto_start_on_login!; changed = true; }
     if (typeof db.data.settings.group_notifications !== 'boolean') { db.data.settings.group_notifications = DEFAULT_SETTINGS.group_notifications!; changed = true; }
+    if (typeof db.data.settings.minimize_after_notification_submit !== 'boolean') { db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit!; changed = true; }
   }
   if (typeof db.data._seq !== 'number') { db.data._seq = 1; changed = true; }
   if (!Array.isArray(db.data.entries)) { db.data.entries = []; changed = true; }
@@ -142,7 +145,8 @@ export function saveSettings(s: Settings) {
     notification_silent: !!s.notification_silent,
     stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes!,
     auto_start_on_login: !!s.auto_start_on_login,
-    group_notifications: !!s.group_notifications
+    group_notifications: !!s.group_notifications,
+    minimize_after_notification_submit: !!s.minimize_after_notification_submit
   };
   db.write();
 }

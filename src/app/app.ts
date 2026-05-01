@@ -24,6 +24,7 @@ export class AppComponent implements OnDestroy {
   menuOpen = signal(false);
   manualDialogDate = signal<string>('');
   pendingCount = signal(0);
+  dialogOpenedFromNotification = signal(false);
   // Track which prompt slot has already triggered an auto-open to avoid reopening immediately after close
   handledPromptSlot = signal<string|null>(null);
   theme = inject(ThemeService);
@@ -33,6 +34,7 @@ export class AppComponent implements OnDestroy {
   private onOpenLogDialog = (e: Event) => {
     const ce = e as CustomEvent<{ slot?: string }>;
     const slot = ce?.detail?.slot;
+    this.dialogOpenedFromNotification.set(false);
     if (!this.dialogOpen()) this.dialogOpen.set(true); else {
       if (slot && slot !== this.handledPromptSlot()) this.handledPromptSlot.set(slot);
     }
@@ -89,8 +91,11 @@ export class AppComponent implements OnDestroy {
     effect(() => {
       const slot = this.ipc.lastPromptSlot();
       if (!slot) return;
+      const source = this.ipc.lastPromptSource();
+      const shouldMinimizeAfterSubmit = source === 'notification' || source === 'auto-focus';
       // Only auto-open if different from last handled slot and currently closed
       if (slot !== this.handledPromptSlot() && !this.dialogOpen()) {
+        this.dialogOpenedFromNotification.set(shouldMinimizeAfterSubmit);
         this.dialogOpen.set(true);
         this.handledPromptSlot.set(slot);
       }
@@ -98,7 +103,9 @@ export class AppComponent implements OnDestroy {
 
     // Manual tray-triggered open should always open even if same slot was previously handled.
     try {
-      const disposeDialogOpenLog = (window as any).workApi.onDialogOpenLog?.((slot?: string) => {
+      const disposeDialogOpenLog = (window as any).workApi.onDialogOpenLog?.((d?: { slot?: string; source?: string }) => {
+        const slot = d?.slot;
+        this.dialogOpenedFromNotification.set(d?.source === 'notification' || d?.source === 'auto-focus');
         if (!this.dialogOpen()) {
           this.dialogOpen.set(true);
         } else {
@@ -130,10 +137,14 @@ export class AppComponent implements OnDestroy {
     window.addEventListener('pointerdown', this.onPointerdown);
   }
 
-  openDialog() { this.dialogOpen.set(true); }
+  openDialog() {
+    this.dialogOpenedFromNotification.set(false);
+    this.dialogOpen.set(true);
+  }
   openManualDialog() { this.manualDialogOpen.set(true); }
   closeDialog() {
     this.dialogOpen.set(false);
+    this.dialogOpenedFromNotification.set(false);
     // Keep the current prompt slot marked as handled so the auto-open effect
     // does not immediately reopen the dialog while that slot is still pending.
     const currentPrompt = this.ipc.lastPromptSlot();

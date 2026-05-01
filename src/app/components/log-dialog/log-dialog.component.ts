@@ -1,8 +1,9 @@
-import { Component, OnInit, AfterViewInit, inject, signal, ChangeDetectionStrategy, output, ViewChild, ElementRef, computed, effect } from '@angular/core';
+import { Component, OnInit, AfterViewInit, inject, signal, ChangeDetectionStrategy, output, ViewChild, ElementRef, computed, effect, input } from '@angular/core';
 import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
 import { IpcService } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
 import { preserveCategoryDescriptions } from '../shared/category-description.util';
+import { findAdjacentPreviousEntry } from './log-dialog-prefill.util';
 
 @Component({
   selector: 'log-dialog',
@@ -16,6 +17,7 @@ import { preserveCategoryDescriptions } from '../shared/category-description.uti
 })
 export class LogDialogComponent implements OnInit, AfterViewInit {
   closed = output<void>();
+  openedFromNotification = input(false);
 
   ipc = inject(IpcService);
 
@@ -69,6 +71,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
       if (promptSlot && list.includes(promptSlot)) {
         // Prefer the slot that triggered the dialog
         this.selectedSlots.set([promptSlot]);
+        this.prefillFromAdjacentPreviousSlot(promptSlot);
       } else if (list.length) {
         // Fallback: first pending slot
         this.selectedSlots.set(list.slice(0, 1));
@@ -123,7 +126,8 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     const otherDescription = this.andetDescription().trim();
     let finalDescription = category === 'Andet' ? otherDescription : baseDescription;
     if (!slots.length || !category || !finalDescription) return;
-    await this.ipc.submitPending(slots, finalDescription, category);
+    const minimizeAfterSubmit = this.openedFromNotification() && !!this.ipc.settings()?.minimize_after_notification_submit;
+    await this.ipc.submitPending(slots, finalDescription, category, { minimizeWindowAfterSubmit: minimizeAfterSubmit });
     // Derive affected day from first slot and trigger reload of day & summary signals
     if (slots.length) {
       const day = slots[0].split('T')[0];
@@ -142,6 +146,29 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     this.andetDescription.set(next.andetDescription);
   }
 
+  private prefillFromAdjacentPreviousSlot(slotKey: string) {
+    const [day] = slotKey.split('T');
+    const slotMinutes = this.ipc.settings()?.slot_minutes ?? 15;
+
+    void window.workApi.getDayEntries(day).then((entries: Array<{ day: string; start: string; description: string; category: string }>) => {
+      if (this.description().trim() || this.category().trim() || this.andetDescription().trim()) return;
+
+      const previousEntry = findAdjacentPreviousEntry(slotKey, entries, slotMinutes);
+      if (!previousEntry) return;
+
+      this.category.set(previousEntry.category);
+      if (previousEntry.category === 'Andet') {
+        this.description.set('');
+        this.andetDescription.set(previousEntry.description);
+      } else {
+        this.description.set(previousEntry.description);
+        this.andetDescription.set('');
+      }
+    }).catch(() => {
+      // Leave the dialog blank if the previous slot cannot be resolved.
+    });
+  }
+
   // Removed suggestion-related methods (refreshSuggestion, applySuggestion, applyWeakMatch).
 
   // Reactive safeguard: if the prompt slot arrives AFTER dialog creation (race), select it.
@@ -153,6 +180,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     // Only adjust if prompt slot is pending and either not selected or selection is empty.
     if (pending.includes(ps) && (currentSel.length === 0 || !currentSel.includes(ps))) {
       this.selectedSlots.set([ps]);
+      this.prefillFromAdjacentPreviousSlot(ps);
     }
   });
 

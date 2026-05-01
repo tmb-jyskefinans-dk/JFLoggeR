@@ -13,9 +13,9 @@ declare global {
       getPendingSlots(): Promise<string[]>;
       getSettings(): Promise<any>;
       saveSettings(settings: any): Promise<void>;
-        submitSlots(payload: { slots: string[], description: string, category: string }): Promise<{ ok: boolean; error?: string }>;
+        submitSlots(payload: { slots: string[], description: string, category: string, minimizeWindowAfterSubmit?: boolean }): Promise<{ ok: boolean; error?: string }>;
       deleteEntry(day: string, start: string): Promise<{ ok: boolean, removed?: number; error?: string }>;
-        onPrompt(cb: (d: any) => void): (() => void) | void;
+        onPrompt(cb: (d: { slot?: string; source?: string }) => void): (() => void) | void;
       onFocus(cb: () => void): (() => void) | void;
       onAppReady?: (cb: () => void) => (() => void) | void;
   sendTestNotification?(body?: string): Promise<{ ok: boolean }>;
@@ -58,6 +58,7 @@ export class IpcService {
   settings = signal<any|null>(null);
   authStatus = signal<AuthStatus>({ configured: false, signedIn: false, method: 'device-code' });
   lastPromptSlot = signal<string|null>(null);
+  lastPromptSource = signal<string|null>(null);
   preselectedSlots = signal<string[]|null>(null);
   windowMaximized = signal<boolean>(false);
   // Flag to indicate next opened log dialog should preselect all pending slots
@@ -70,6 +71,7 @@ export class IpcService {
   constructor() {
     const router = inject(Router);
     window.workApi.onPrompt((d) => {
+      this.lastPromptSource.set(typeof d?.source === 'string' ? d.source : null);
       if (d && typeof d.slot === 'string') {
         // Set prompt slot immediately
         this.lastPromptSlot.set(d.slot);
@@ -251,8 +253,8 @@ export class IpcService {
   }
 
 
-  submitPending(slots: string[], description: string, category: string) {
-    return window.workApi.submitSlots({ slots, description, category })
+  submitPending(slots: string[], description: string, category: string, opts?: { minimizeWindowAfterSubmit?: boolean }) {
+    return window.workApi.submitSlots({ slots, description, category, minimizeWindowAfterSubmit: !!opts?.minimizeWindowAfterSubmit })
       .then((resp) => {
         if (!resp?.ok) {
           throw new Error(resp?.error || 'submitPending failed');

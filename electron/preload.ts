@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('workApi', {
 
   // Backlog queue
   getPendingSlots: () => ipcRenderer.invoke('queue:get'),
-  submitSlots: (payload: { slots: string[], description: string, category: string }) =>
+  submitSlots: (payload: { slots: string[], description: string, category: string, minimizeWindowAfterSubmit?: boolean }) =>
     ipcRenderer.invoke('queue:submit', payload),
 
   // Azure auth
@@ -55,8 +55,8 @@ contextBridge.exposeInMainWorld('workApi', {
     ipcRenderer.on('navigate:today', handler);
     return () => ipcRenderer.removeListener('navigate:today', handler);
   },
-  onDialogOpenLog: (cb: (slot?: string) => void) => {
-    const handler = (_e: Electron.IpcRendererEvent, d: { slot?: string }) => cb(d?.slot);
+  onDialogOpenLog: (cb: (d: { slot?: string; source?: string }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: { slot?: string; source?: string }) => cb(d ?? {});
     ipcRenderer.on('dialog:open-log', handler);
     return () => ipcRenderer.removeListener('dialog:open-log', handler);
   },
