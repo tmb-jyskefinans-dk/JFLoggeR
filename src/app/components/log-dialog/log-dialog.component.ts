@@ -1,6 +1,6 @@
-import { Component, OnInit, AfterViewInit, inject, signal, ChangeDetectionStrategy, output, ViewChild, ElementRef, computed, effect, input } from '@angular/core';
+import { Component, OnInit, AfterViewInit, OnDestroy, inject, signal, ChangeDetectionStrategy, output, ViewChild, ViewChildren, QueryList, ElementRef, computed, effect, input } from '@angular/core';
 import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
-import { IpcService } from '../../services/ipc.service';
+import { IpcService, JiraIssueSuggestion } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
 import { preserveCategoryDescriptions } from '../shared/category-description.util';
 import { findAdjacentPreviousEntry } from './log-dialog-prefill.util';
@@ -15,7 +15,7 @@ import { findAdjacentPreviousEntry } from './log-dialog-prefill.util';
     'class': 'contents'
   }
 })
-export class LogDialogComponent implements OnInit, AfterViewInit {
+export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   closed = output<void>();
   openedFromNotification = input(false);
 
@@ -35,6 +35,13 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   recent = this.ipc.recent;
 
   selectedSlots = signal<string[]>([]);
+  jiraSuggestions = signal<JiraIssueSuggestion[]>([]);
+  jiraLoading = signal(false);
+  jiraWarning = signal('');
+  jiraActiveIndex = signal<number>(-1);
+  private jiraDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+  private readonly jiraMinTermLength = 2;
+  private readonly jiraLookupDebounceMs = 300;
   allSelected = computed(() => {
     const all = this.allSlots();
     const selected = this.selectedSlots();
@@ -45,6 +52,10 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   andetDescription = signal('');
   // Suggestion feature removed; keeping component lean.
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
+  private jiraAutocompleteCategories = new Set(
+    CATEGORY_GROUPS.find((g) => g.label === 'Udvikling Projekter')?.items ?? []
+  );
+  jiraAutocompleteEnabled = computed(() => this.jiraAutocompleteCategories.has(this.category().trim()));
   unmatchedCategory(): boolean {
     const c = this.category().trim();
     if (!c) return false;
@@ -52,6 +63,8 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   }
 
   @ViewChild('descInput') descInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('submitBtn') submitBtn?: ElementRef<HTMLButtonElement>;
+  @ViewChildren('jiraOption') jiraOptions?: QueryList<ElementRef<HTMLButtonElement>>;
 
   ngOnInit() {
     const list = this.ipc.pendingSlots();
@@ -81,7 +94,17 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
   }
 
   ngAfterViewInit() {
-    queueMicrotask(() => this.descInput?.nativeElement.focus());
+    queueMicrotask(() => {
+      if (this.openedFromNotification()) this.submitBtn?.nativeElement.focus();
+      else this.descInput?.nativeElement.focus();
+    });
+  }
+
+  ngOnDestroy() {
+    if (this.jiraDebounceHandle) {
+      clearTimeout(this.jiraDebounceHandle);
+      this.jiraDebounceHandle = null;
+    }
   }
 
   toggle(s: string) {
@@ -118,6 +141,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
       // Clear special field when leaving 'Andet'
       if (this.category() !== 'Andet') this.andetDescription.set('');
     }
+    this.refreshJiraAutocomplete(true);
   }
   async submit() {
     const slots = this.selectedSlots();
@@ -144,6 +168,111 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     const next = preserveCategoryDescriptions(nextCategory, this.description(), this.andetDescription());
     this.description.set(next.description);
     this.andetDescription.set(next.andetDescription);
+    this.refreshJiraAutocomplete(true);
+  }
+
+  onDescriptionInput(nextValue: string) {
+    this.description.set(nextValue);
+    this.refreshJiraAutocomplete();
+  }
+
+  onDescriptionFocus() {
+    this.refreshJiraAutocomplete(true);
+  }
+
+  onDescriptionKeyDown(event: KeyboardEvent) {
+    const suggestions = this.jiraSuggestions();
+    if (!suggestions.length) return;
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this.jiraActiveIndex.set(Math.min(this.jiraActiveIndex() + 1, suggestions.length - 1));
+      this.scheduleScrollActiveJiraSuggestionIntoView();
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      this.jiraActiveIndex.set(Math.max(this.jiraActiveIndex() - 1, 0));
+      this.scheduleScrollActiveJiraSuggestionIntoView();
+      return;
+    }
+    if (event.key === 'Enter' && this.jiraActiveIndex() >= 0) {
+      event.preventDefault();
+      this.selectJiraSuggestion(suggestions[this.jiraActiveIndex()]);
+      return;
+    }
+    if (event.key === 'Escape') {
+      this.clearJiraSuggestions();
+    }
+  }
+
+  onDescriptionBlur() {
+    // Let click handler on suggestion run before closing list.
+    setTimeout(() => this.clearJiraSuggestions(), 120);
+  }
+
+  selectJiraSuggestion(item: JiraIssueSuggestion) {
+    if (!item) return;
+    this.description.set(`${item.key} - ${item.summary}`);
+    this.clearJiraSuggestions();
+  }
+
+  private clearJiraSuggestions() {
+    this.jiraSuggestions.set([]);
+    this.jiraActiveIndex.set(-1);
+  }
+
+  private refreshJiraAutocomplete(immediate = false) {
+    if (this.jiraDebounceHandle) {
+      clearTimeout(this.jiraDebounceHandle);
+      this.jiraDebounceHandle = null;
+    }
+
+    if (!this.jiraAutocompleteEnabled()) {
+      this.jiraWarning.set('');
+      this.jiraLoading.set(false);
+      this.clearJiraSuggestions();
+      return;
+    }
+
+    const term = this.description().trim();
+    if (term.length < this.jiraMinTermLength) {
+      this.jiraWarning.set('');
+      this.jiraLoading.set(false);
+      this.clearJiraSuggestions();
+      return;
+    }
+
+    const runLookup = () => {
+      this.jiraLoading.set(true);
+      this.jiraWarning.set('');
+      this.ipc.searchJiraIssues(term).then((resp) => {
+        if (!resp.ok) {
+          this.jiraWarning.set(resp.error || 'Jira forslag kunne ikke hentes.');
+          this.clearJiraSuggestions();
+          return;
+        }
+        this.jiraSuggestions.set(resp.items);
+        this.jiraActiveIndex.set(resp.items.length ? 0 : -1);
+        this.scheduleScrollActiveJiraSuggestionIntoView();
+      }).catch(() => {
+        this.jiraWarning.set('Jira forslag kunne ikke hentes.');
+        this.clearJiraSuggestions();
+      }).finally(() => {
+        this.jiraLoading.set(false);
+      });
+    };
+
+    if (immediate) runLookup();
+    else this.jiraDebounceHandle = setTimeout(runLookup, this.jiraLookupDebounceMs);
+  }
+
+  private scheduleScrollActiveJiraSuggestionIntoView() {
+    queueMicrotask(() => {
+      const activeIndex = this.jiraActiveIndex();
+      const option = this.jiraOptions?.get(activeIndex)?.nativeElement;
+      option?.scrollIntoView({ block: 'nearest' });
+    });
   }
 
   private prefillFromAdjacentPreviousSlot(slotKey: string) {
@@ -177,8 +306,9 @@ export class LogDialogComponent implements OnInit, AfterViewInit {
     const pending = this.ipc.pendingSlots();
     if (!ps) return;
     const currentSel = this.selectedSlots();
-    // Only adjust if prompt slot is pending and either not selected or selection is empty.
-    if (pending.includes(ps) && (currentSel.length === 0 || !currentSel.includes(ps))) {
+    // Preserve user multi-selection while dialog is open. Only auto-apply prompt slot
+    // when there is no active selection (initial open/race recovery).
+    if (pending.includes(ps) && currentSel.length === 0) {
       this.selectedSlots.set([ps]);
       this.prefillFromAdjacentPreviousSlot(ps);
     }

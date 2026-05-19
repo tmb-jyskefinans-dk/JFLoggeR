@@ -94,21 +94,26 @@
         </div>
       </div>
 
-      <div class="md:col-span-3 flex items-start gap-3 mt-2">
-        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="include_active_slot" aria-describedby="include-active-help">
-          <span class="leading-tight">
-            Inkludér aktivt interval i "Log nu"
-            <span id="include-active-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Når slået til kan et igangværende interval logges med det samme, også hvis du er startet tidligere end normal starttid.</span>
-          </span>
-        </label>
+      <div class="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
+        <div class="flex flex-col gap-1">
+          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira project key</label>
+          <input type="text" formControlName="jira_project_key" placeholder="fx TEAMJYFWEB"
+            class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+          <p class="text-xs text-slate-500 dark:text-slate-400">Bruges i JQL-filteret for autocomplete under Udvikling Projekter.</p>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira PSA key</label>
+          <input type="password" formControlName="jira_psa_key" placeholder="Indsæt PSA key"
+            class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+          <p class="text-xs text-slate-500 dark:text-slate-400">Bruges som <strong>Bearer</strong> token mod Jira API for forslag.</p>
+        </div>
       </div>
 
       <div class="md:col-span-3 flex items-start gap-3 mt-2">
         <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
           <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_focus_on_slot" aria-describedby="auto-focus-help">
           <span class="leading-tight">
-            Bring vinduet i front og åbn logdialogen automatisk når et nyt interval starter
+            Bring vinduet i front og åbn logdialogen automatisk når et interval er afsluttet
             <span id="auto-focus-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for aktiv/påtrængende påmindelse. Deaktiver hvis du kun ønsker passive notifikationer.</span>
           </span>
         </label>

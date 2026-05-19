@@ -38,9 +38,10 @@ export class SettingsComponent {
     weekday_4: true,
     weekday_5: true,
     weekday_6: false,
-    include_active_slot: true,
     azure_tenant_id: '',
     azure_client_id: '',
+    jira_psa_key: '',
+    jira_project_key: '',
     auto_focus_on_slot: false,
     notification_silent: true,
     stale_threshold_minutes: 45,
@@ -92,9 +93,10 @@ export class SettingsComponent {
         s.work_end !== v.work_end ||
         Number(s.slot_minutes) !== Number(v.slot_minutes) ||
            maskOrig !== maskNow ||
-        ((s.include_active_slot !== false) !== !!v.include_active_slot) ||
         ((s.azure_tenant_id ?? '') !== (v.azure_tenant_id ?? '')) ||
         ((s.azure_client_id ?? '') !== (v.azure_client_id ?? '')) ||
+        ((s.jira_psa_key ?? '') !== (v.jira_psa_key ?? '')) ||
+        ((s.jira_project_key ?? '') !== (v.jira_project_key ?? '')) ||
         (!!s.auto_focus_on_slot !== !!v.auto_focus_on_slot) ||
         (!!s.notification_silent !== !!v.notification_silent) ||
         (Number(s.stale_threshold_minutes) !== Number(v.stale_threshold_minutes)) ||
@@ -126,9 +128,10 @@ export class SettingsComponent {
       weekday_4: (s.weekdays_mask & (1 << 4)) !== 0,
       weekday_5: (s.weekdays_mask & (1 << 5)) !== 0,
       weekday_6: (s.weekdays_mask & (1 << 6)) !== 0,
-      include_active_slot: s.include_active_slot !== false,
       azure_tenant_id: s.azure_tenant_id ?? '',
       azure_client_id: s.azure_client_id ?? '',
+      jira_psa_key: s.jira_psa_key ?? '',
+      jira_project_key: s.jira_project_key ?? '',
       auto_focus_on_slot: !!s.auto_focus_on_slot,
       notification_silent: !!s.notification_silent,
       stale_threshold_minutes: Number(s.stale_threshold_minutes) || 45,
@@ -146,9 +149,10 @@ export class SettingsComponent {
       work_end: raw.work_end,
       slot_minutes: Number(raw.slot_minutes),
       weekdays_mask,
-      include_active_slot: raw.include_active_slot,
       azure_tenant_id: raw.azure_tenant_id.trim(),
       azure_client_id: raw.azure_client_id.trim(),
+      jira_psa_key: raw.jira_psa_key.trim(),
+      jira_project_key: raw.jira_project_key.trim().toUpperCase(),
       auto_focus_on_slot: raw.auto_focus_on_slot,
       notification_silent: raw.notification_silent,
       stale_threshold_minutes: Number(raw.stale_threshold_minutes),

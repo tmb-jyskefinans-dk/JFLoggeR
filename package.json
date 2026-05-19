@@ -27,6 +27,7 @@
     "electron:run:dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:4200 electron ./electron/.dist/main.js",
     "start": "electron-forge start",
     "test:unit": "jest",
+    "test:ng:edge": "node scripts/run-ng-test-edge.mjs",
     "package": "electron-forge package"
   },
   "build": {

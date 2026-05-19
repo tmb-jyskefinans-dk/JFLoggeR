@@ -27,7 +27,7 @@ const DEFAULT_SETTINGS = {
     work_end: '16:00',
     slot_minutes: 15,
     weekdays_mask: 0b0111110, // Mon–Fri
-    include_active_slot: true,
+    include_active_slot: false,
     azure_tenant_id: '',
     azure_client_id: '',
     auto_focus_on_slot: false,
@@ -35,7 +35,9 @@ const DEFAULT_SETTINGS = {
     stale_threshold_minutes: 45,
     auto_start_on_login: false,
     group_notifications: true,
-    minimize_after_notification_submit: false
+    minimize_after_notification_submit: false,
+    jira_psa_key: '',
+    jira_project_key: ''
 };
 let db;
 function sanitizeSlotMinutes(value) {
@@ -78,8 +80,8 @@ function initDb() {
             changed = true;
         }
         // ensure new fields
-        if (typeof db.data.settings.include_active_slot !== 'boolean') {
-            db.data.settings.include_active_slot = DEFAULT_SETTINGS.include_active_slot;
+        if (db.data.settings.include_active_slot !== false) {
+            db.data.settings.include_active_slot = false;
             changed = true;
         }
         if (typeof db.data.settings.azure_tenant_id !== 'string') {
@@ -114,6 +116,14 @@ function initDb() {
             db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit;
             changed = true;
         }
+        if (typeof db.data.settings.jira_psa_key !== 'string') {
+            db.data.settings.jira_psa_key = DEFAULT_SETTINGS.jira_psa_key;
+            changed = true;
+        }
+        if (typeof db.data.settings.jira_project_key !== 'string') {
+            db.data.settings.jira_project_key = DEFAULT_SETTINGS.jira_project_key;
+            changed = true;
+        }
     }
     if (typeof db.data._seq !== 'number') {
         db.data._seq = 1;
@@ -144,7 +154,7 @@ function saveSettings(s) {
         work_end: s.work_end,
         slot_minutes: sanitizeSlotMinutes(s.slot_minutes),
         weekdays_mask: Number(s.weekdays_mask) >>> 0,
-        include_active_slot: s.include_active_slot !== false,
+        include_active_slot: false,
         azure_tenant_id: String(s.azure_tenant_id ?? '').trim(),
         azure_client_id: String(s.azure_client_id ?? '').trim(),
         auto_focus_on_slot: !!s.auto_focus_on_slot,
@@ -152,7 +162,9 @@ function saveSettings(s) {
         stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes,
         auto_start_on_login: !!s.auto_start_on_login,
         group_notifications: !!s.group_notifications,
-        minimize_after_notification_submit: !!s.minimize_after_notification_submit
+        minimize_after_notification_submit: !!s.minimize_after_notification_submit,
+        jira_psa_key: String(s.jira_psa_key ?? '').trim(),
+        jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase()
     };
     db.write();
 }

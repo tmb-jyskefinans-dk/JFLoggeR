@@ -5,6 +5,7 @@ const tslib_1 = require("tslib");
 const electron_1 = require("electron");
 const node_path_1 = tslib_1.__importDefault(require("node:path"));
 const node_fs_1 = tslib_1.__importDefault(require("node:fs"));
+const node_https_1 = tslib_1.__importDefault(require("node:https"));
 // Lightweight structured logging to file + console. Rotates by day (new file per day).
 function ensureLogDir() {
     const dir = node_path_1.default.join(electron_1.app.getPath('userData'), 'logs');
@@ -34,6 +35,31 @@ function writeLog(level, message, meta) {
         node_fs_1.default.appendFile(currentLogFile(), line + '\n', () => { });
     }
     catch (e) { /* last-chance; avoid throwing in logger */ }
+}
+const CORPORATE_JIRA_ORIGIN = 'https://app-jira.corp.jyskebank.net';
+const corporateJiraAgent = new node_https_1.default.Agent({ rejectUnauthorized: false });
+function fetchCorporateJiraJson(url, headers) {
+    return new Promise((resolve, reject) => {
+        const req = node_https_1.default.request(url, {
+            method: 'GET',
+            headers,
+            agent: corporateJiraAgent
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+            res.on('end', () => {
+                const bodyText = Buffer.concat(chunks).toString('utf8');
+                const status = res.statusCode ?? 500;
+                resolve({
+                    status,
+                    ok: status >= 200 && status < 300,
+                    json: async () => bodyText ? JSON.parse(bodyText) : {}
+                });
+            });
+        });
+        req.on('error', reject);
+        req.end();
+    });
 }
 let fatalShutdownInProgress = false;
 function handleFatalProcessError(kind, error) {
@@ -432,7 +458,7 @@ function scheduleStaleCheck() {
     }, 60000);
 }
 function rebuildBacklogForToday({ includeFuture = false } = {}) {
-    // Build backlog only for past (and optionally current) unlogged slots.
+    // Build backlog only for finished unlogged slots.
     const now = new Date();
     const day = (0, time_1.toLocalDateYMD)(now);
     const done = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
@@ -452,9 +478,6 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
         if (!done.has(key))
             enqueuePending(key, { silent: true });
     }
-    // Also include the currently running slot so users can log immediately
-    // when they start early or mid-slot while the app is running.
-    includeCurrentRunningSlot(now, done);
     // Single emit after bulk rebuild
     try {
         win?.webContents.send('queue:updated');
@@ -484,30 +507,11 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
         if (!doneOrLogged(key))
             enqueuePending(key, { silent: true });
     }
-    includeCurrentRunningSlot(now, existing);
     try {
         win?.webContents.send('queue:updated');
     }
     catch { }
     function doneOrLogged(key) { return existing.has(key); }
-}
-function includeCurrentRunningSlot(now, existing) {
-    if (!(0, time_1.isWorkdayEnabled)(now))
-        return;
-    const settings = (0, db_1.getSettings)();
-    if (settings.include_active_slot === false)
-        return;
-    const { h: endH, m: endM } = (0, time_1.parseHM)(settings.work_end);
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const endMinutes = endH * 60 + endM;
-    // Keep the "normal day" end boundary; only expand start flexibility.
-    if (nowMinutes >= endMinutes)
-        return;
-    const start = (0, time_1.currentSlotStart)(now);
-    const key = (0, time_1.slotKey)(start);
-    if (existing.has(key) || pending.has(key))
-        return;
-    enqueuePending(key, { silent: true });
 }
 function logIpcFailure(channel, err) {
     const error = err;
@@ -603,6 +607,49 @@ electron_1.ipcMain.handle('auth:signout', async () => {
     writeLog('info', 'Azure sign-out completed');
     return result;
 });
+electron_1.ipcMain.handle('jira:search-issues', async (_e, payload) => {
+    try {
+        const term = String(payload?.term ?? '').trim();
+        if (term.length < 2)
+            return { ok: true, items: [] };
+        const settings = (0, db_1.getSettings)();
+        const psaKey = String(settings.jira_psa_key ?? '').trim();
+        const projectKey = String(settings.jira_project_key ?? '').trim().toUpperCase();
+        if (!psaKey || !projectKey) {
+            return { ok: false, error: 'Jira PSA key eller project key mangler i indstillinger.' };
+        }
+        const escapedTerm = term.replace(/"/g, '\\"');
+        const keyCandidate = term.toUpperCase().replace(/"/g, '\\"');
+        const clauses = [`summary ~ "${escapedTerm}*"`];
+        if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(term)) {
+            clauses.unshift(`key = "${keyCandidate}"`);
+        }
+        const query = encodeURIComponent(`project = ${projectKey} AND (${clauses.join(' OR ')}) ORDER BY created DESC`);
+        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/search?jql=${query}&fields=key,summary,issuetype&maxResults=10`;
+        console.log(url);
+        const res = await fetchCorporateJiraJson(url, {
+            Accept: 'application/json',
+            Authorization: `Bearer ${psaKey}`
+        });
+        if (!res.ok) {
+            return { ok: false, error: `Jira opslag fejlede (${res.status}).` };
+        }
+        const data = await res.json();
+        const items = (data.issues ?? [])
+            .map((issue) => ({
+            key: String(issue.key ?? '').trim(),
+            summary: String(issue.fields?.summary ?? '').trim(),
+            iconUrl: String(issue.fields?.issuetype?.iconUrl ?? '').trim()
+        }))
+            .filter((item) => !!item.key && !!item.summary);
+        return { ok: true, items };
+    }
+    catch (e) {
+        console.log('Jira search failed', e);
+        logIpcFailure('jira:search-issues', e);
+        return { ok: false, error: 'Jira opslag fejlede.' };
+    }
+});
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
 electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
     try {
@@ -637,10 +684,6 @@ electron_1.ipcMain.handle('log:write', (_e, entry) => {
     }
 });
 electron_1.ipcMain.handle('queue:get', () => {
-    const now = new Date();
-    const day = (0, time_1.toLocalDateYMD)(now);
-    const existing = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
-    includeCurrentRunningSlot(now, existing);
     return Array.from(pending).sort();
 });
 electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
