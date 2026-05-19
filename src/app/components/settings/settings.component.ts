@@ -63,7 +63,7 @@ export class SettingsComponent {
   importResult = signal<{ ok: boolean; imported?: number; skipped?: number; details?: { line: number; reason: string }[]; error?: string }|null>(null);
   importing = signal<boolean>(false);
 
-  days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  days = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
   initialSettings = signal<any|null>(null);
 
   weekdayState = computed(() => {
