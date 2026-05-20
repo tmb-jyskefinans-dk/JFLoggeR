@@ -31,6 +31,7 @@ export type Settings = {
   minimize_after_notification_submit?: boolean; // minimize app after logging from notification-opened dialog
   jira_psa_key?: string; // Jira PSA key for API access
   jira_project_key?: string; // Jira project key for autocomplete queries
+  jira_log_on_afstem?: boolean; // automatically post Jira worklogs when marking a day as afstemt
 };
 
 type Data = {
@@ -55,7 +56,8 @@ const DEFAULT_SETTINGS: Settings = {
   group_notifications: true,
   minimize_after_notification_submit: false,
   jira_psa_key: '',
-  jira_project_key: ''
+  jira_project_key: '',
+  jira_log_on_afstem: false
 };
 
 let db: LowSync<Data>;
@@ -123,6 +125,7 @@ export function initDb() {
     if (typeof db.data.settings.minimize_after_notification_submit !== 'boolean') { db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit!; changed = true; }
     if (typeof db.data.settings.jira_psa_key !== 'string') { db.data.settings.jira_psa_key = DEFAULT_SETTINGS.jira_psa_key!; changed = true; }
     if (typeof db.data.settings.jira_project_key !== 'string') { db.data.settings.jira_project_key = DEFAULT_SETTINGS.jira_project_key!; changed = true; }
+    if (typeof db.data.settings.jira_log_on_afstem !== 'boolean') { db.data.settings.jira_log_on_afstem = DEFAULT_SETTINGS.jira_log_on_afstem!; changed = true; }
   }
   if (typeof db.data._seq !== 'number') { db.data._seq = 1; changed = true; }
   if (!Array.isArray(db.data.entries)) { db.data.entries = []; changed = true; }
@@ -154,7 +157,8 @@ export function saveSettings(s: Settings) {
     group_notifications: !!s.group_notifications,
     minimize_after_notification_submit: !!s.minimize_after_notification_submit,
     jira_psa_key: String(s.jira_psa_key ?? '').trim(),
-    jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase()
+    jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase(),
+    jira_log_on_afstem: !!s.jira_log_on_afstem
   };
   db.write();
 }

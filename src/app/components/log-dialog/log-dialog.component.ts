@@ -18,8 +18,16 @@ import { findAdjacentPreviousEntry } from './log-dialog-prefill.util';
 export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   closed = output<void>();
   openedFromNotification = input(false);
+  manualMode = input(false);
+  manualInitialDate = input<string>('');
 
   ipc = inject(IpcService);
+
+  // Manual mode fields
+  manualDate = signal(new Date().toISOString().slice(0, 10));
+  manualStart = signal('08:00');
+  manualEnd = signal('09:00');
+  manualError = signal('');
 
   showAll = false;
   allSlots = this.ipc.pendingSlots;
@@ -40,6 +48,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   jiraWarning = signal('');
   jiraActiveIndex = signal<number>(-1);
   private jiraDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+  private submitFocusRetryHandle: ReturnType<typeof setTimeout> | null = null;
   private readonly jiraMinTermLength = 2;
   private readonly jiraLookupDebounceMs = 300;
   allSelected = computed(() => {
@@ -67,6 +76,12 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChildren('jiraOption') jiraOptions?: QueryList<ElementRef<HTMLButtonElement>>;
 
   ngOnInit() {
+    if (this.manualMode()) {
+      const d = this.manualInitialDate();
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) this.manualDate.set(d);
+      this.ipc.loadRecent();
+      return;
+    }
     const list = this.ipc.pendingSlots();
     const preselected = this.ipc.preselectedSlots();
     const promptSlot = this.ipc.lastPromptSlot ? this.ipc.lastPromptSlot() : null;
@@ -95,7 +110,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngAfterViewInit() {
     queueMicrotask(() => {
-      if (this.openedFromNotification()) this.submitBtn?.nativeElement.focus();
+      if (this.openedFromNotification()) this.focusSubmitWhenReady();
       else this.descInput?.nativeElement.focus();
     });
   }
@@ -105,6 +120,24 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
       clearTimeout(this.jiraDebounceHandle);
       this.jiraDebounceHandle = null;
     }
+    if (this.submitFocusRetryHandle) {
+      clearTimeout(this.submitFocusRetryHandle);
+      this.submitFocusRetryHandle = null;
+    }
+  }
+
+  private focusSubmitWhenReady(attempt = 0) {
+    const btn = this.submitBtn?.nativeElement;
+    if (btn && !btn.disabled) {
+      btn.focus();
+      return;
+    }
+    if (attempt >= 12) {
+      // Fallback after ~600ms if submit never becomes enabled.
+      this.descInput?.nativeElement.focus();
+      return;
+    }
+    this.submitFocusRetryHandle = setTimeout(() => this.focusSubmitWhenReady(attempt + 1), 50);
   }
 
   toggle(s: string) {
@@ -144,6 +177,10 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     this.refreshJiraAutocomplete(true);
   }
   async submit() {
+    if (this.manualMode()) {
+      await this.submitManual();
+      return;
+    }
     const slots = this.selectedSlots();
     const category = this.category().trim();
     const baseDescription = this.description().trim();
@@ -161,6 +198,53 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     this.category.set('');
     this.andetDescription.set('');
     this.selectedSlots.set([]);
+    this.closed.emit();
+  }
+
+  private async submitManual() {
+    this.manualError.set('');
+    const date = this.manualDate();
+    const start = this.manualStart();
+    const end = this.manualEnd();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { this.manualError.set('Ugyldig dato'); return; }
+    if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) { this.manualError.set('Ugyldig tid'); return; }
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const startMin = sh * 60 + sm;
+    const endMin = eh * 60 + em;
+    if (endMin <= startMin) { this.manualError.set('Sluttidspunkt skal være efter starttidspunkt'); return; }
+    const category = this.category().trim();
+    const baseDescription = this.description().trim();
+    const otherDescription = this.andetDescription().trim();
+    const finalDescription = category === 'Andet' ? otherDescription : baseDescription;
+    if (!category || !finalDescription) { this.manualError.set('Beskrivelse og kategori er påkrævet'); return; }
+    const slotMinutes = this.ipc.settings()?.slot_minutes ?? 15;
+    const slots: string[] = [];
+    for (let m = Math.floor(startMin / slotMinutes) * slotMinutes; m < endMin; m += slotMinutes) {
+      const h = Math.floor(m / 60), mm = m % 60;
+      slots.push(`${date}T${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+    }
+    const dayEntries = await window.workApi.getDayEntries(date);
+    const toMin = (hm: string): number => {
+      const [h, m] = String(hm ?? '').split(':').map(Number);
+      return Number.isFinite(h) && Number.isFinite(m) ? (h * 60 + m) : NaN;
+    };
+    const isCovered = (slotKey: string): boolean => {
+      const slotMin = toMin(slotKey.slice(11, 16));
+      if (!Number.isFinite(slotMin)) return false;
+      return dayEntries.some((e: any) => {
+        const es = toMin(e?.start);
+        const ee = toMin(e?.end);
+        return Number.isFinite(es) && Number.isFinite(ee) && ee > es && slotMin >= es && slotMin < ee;
+      });
+    };
+    const novel = slots.filter(k => !isCovered(k));
+    if (!novel.length) { this.manualError.set('Ingen nye intervaller at gemme.'); return; }
+    await this.ipc.submitPending(novel, finalDescription, category);
+    this.ipc.loadDay(date);
+    this.description.set('');
+    this.category.set('');
+    this.andetDescription.set('');
     this.closed.emit();
   }
 
@@ -222,6 +306,14 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     this.jiraActiveIndex.set(-1);
   }
 
+  /** If description already holds a resolved 'KEY-123 - Summary' value, extract just the key
+   * so the autocomplete search uses a clean Jira key instead of the full display string. */
+  private effectiveJiraSearchTerm(): string {
+    const desc = this.description().trim();
+    const match = desc.match(/^([A-Z]+-\d+)\s*-\s*.+/);
+    return match ? match[1] : desc;
+  }
+
   private refreshJiraAutocomplete(immediate = false) {
     if (this.jiraDebounceHandle) {
       clearTimeout(this.jiraDebounceHandle);
@@ -235,7 +327,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
-    const term = this.description().trim();
+    const term = this.effectiveJiraSearchTerm();
     if (term.length < this.jiraMinTermLength) {
       this.jiraWarning.set('');
       this.jiraLoading.set(false);

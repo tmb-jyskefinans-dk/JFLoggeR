@@ -60,8 +60,20 @@ export class ManualLogComponent implements OnInit {
       slots.push(`${date}T${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
     }
     const dayEntries = await window.workApi.getDayEntries(date);
-    const done = new Set(dayEntries.map((e:any)=> `${e.day}T${e.start}`));
-    const novel = slots.filter(k => !done.has(k));
+    const toMin = (hm: string): number => {
+      const [h, m] = String(hm ?? '').split(':').map(Number);
+      return Number.isFinite(h) && Number.isFinite(m) ? (h * 60 + m) : NaN;
+    };
+    const isCovered = (slotKey: string): boolean => {
+      const slotMin = toMin(slotKey.slice(11, 16));
+      if (!Number.isFinite(slotMin)) return false;
+      return dayEntries.some((e: any) => {
+        const es = toMin(e?.start);
+        const ee = toMin(e?.end);
+        return Number.isFinite(es) && Number.isFinite(ee) && ee > es && slotMin >= es && slotMin < ee;
+      });
+    };
+    const novel = slots.filter(k => !isCovered(k));
     if (!novel.length) { this.error.set('No new slots to save.'); return; }
 
     const category = this.category().trim();

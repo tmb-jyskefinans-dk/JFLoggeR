@@ -37,7 +37,8 @@ const DEFAULT_SETTINGS = {
     group_notifications: true,
     minimize_after_notification_submit: false,
     jira_psa_key: '',
-    jira_project_key: ''
+    jira_project_key: '',
+    jira_log_on_afstem: false
 };
 let db;
 function sanitizeSlotMinutes(value) {
@@ -124,6 +125,10 @@ function initDb() {
             db.data.settings.jira_project_key = DEFAULT_SETTINGS.jira_project_key;
             changed = true;
         }
+        if (typeof db.data.settings.jira_log_on_afstem !== 'boolean') {
+            db.data.settings.jira_log_on_afstem = DEFAULT_SETTINGS.jira_log_on_afstem;
+            changed = true;
+        }
     }
     if (typeof db.data._seq !== 'number') {
         db.data._seq = 1;
@@ -164,7 +169,8 @@ function saveSettings(s) {
         group_notifications: !!s.group_notifications,
         minimize_after_notification_submit: !!s.minimize_after_notification_submit,
         jira_psa_key: String(s.jira_psa_key ?? '').trim(),
-        jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase()
+        jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase(),
+        jira_log_on_afstem: !!s.jira_log_on_afstem
     };
     db.write();
 }

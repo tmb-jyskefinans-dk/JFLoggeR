@@ -19,6 +19,19 @@ export interface JiraIssueSuggestion {
   iconUrl: string;
 }
 
+export interface JiraWorklogEntry {
+  key: string;
+  seconds: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface JiraWorklogResult {
+  ok: boolean;
+  results?: JiraWorklogEntry[];
+  error?: string;
+}
+
 declare global {
   interface Window {
     workApi: {
@@ -49,6 +62,7 @@ declare global {
       signInMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
       signOutMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
       jiraSearchIssues?(term: string): Promise<{ ok: boolean; items?: JiraIssueSuggestion[]; error?: string }>;
+      jiraLogWorklog?(day: string): Promise<JiraWorklogResult>;
     };
   }
 }
@@ -325,6 +339,17 @@ export class IpcService {
       .catch((err) => {
         console.error('[ipc] searchJiraIssues failed', err);
         return { ok: false, items: [] as JiraIssueSuggestion[], error: 'Jira søgning fejlede.' };
+      });
+  }
+
+  logWorkToJira(day: string): Promise<JiraWorklogResult> {
+    if (!window.workApi.jiraLogWorklog) {
+      return Promise.resolve({ ok: false, error: 'Jira worklog er ikke tilgængelig.' });
+    }
+    return window.workApi.jiraLogWorklog(day)
+      .catch((err) => {
+        console.error('[ipc] logWorkToJira failed', err);
+        return { ok: false, error: 'Jira worklog fejlede.' } as JiraWorklogResult;
       });
   }
 }

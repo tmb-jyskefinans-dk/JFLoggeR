@@ -1,4 +1,14 @@
 <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 shadow-sm p-6 max-w-4xl mx-auto text-slate-700 dark:text-slate-200">
+  @if(saveToast()) {
+    <div class="fixed bottom-4 right-4 z-50 select-none">
+      <div class="rounded-md px-4 py-2 text-xs shadow-lg flex items-center gap-2"
+           [class]="saveToast()!.kind === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'"
+           role="status" aria-live="polite">
+        <span>{{saveToast()!.message}}</span>
+      </div>
+    </div>
+  }
+
   <div class="flex items-start justify-between mb-6">
     <div class="space-y-1">
   <h2 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Indstillinger</h2>
@@ -20,129 +30,157 @@
       }
     </div>
   } @else {
-    <form class="grid grid-cols-1 md:grid-cols-3 gap-5" [formGroup]="settingsForm" novalidate>
-      <div class="flex flex-col gap-1">
-  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde start</label>
-  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" formControlName="work_start" required>
-      </div>
-      <div class="flex flex-col gap-1">
-  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde slut</label>
-  <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" formControlName="work_end" required>
-      </div>
-      <div class="flex flex-col gap-1">
-  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Intervallængde (minutter)</label>
-  <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" formControlName="slot_minutes" required>
-          @for(m of [1,5,10,15,20,30,60]; track m) { <option [value]="m">{{m}}</option> }
-        </select>
-      </div>
-
-      <div class="md:col-span-3 flex flex-col gap-2 mt-2">
-  <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Aktive ugedage</label>
-  <div class="flex flex-wrap gap-2" role="group" aria-label="Aktive ugedage">
-          @for(d of days; track d; let i = $index;) {
-            <button type="button" (click)="toggleWeekday(i)" [attr.aria-pressed]="weekdayState()[i]"
-              class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-              [class]="weekdayState()[i] ? 'border-indigo-600 bg-indigo-600 text-white dark:bg-indigo-500 dark:border-indigo-500' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-400 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
-              {{d}}
-            </button>
-          }
+    <form class="grid grid-cols-1 gap-5" [formGroup]="settingsForm" novalidate>
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
+        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Arbejdstid og Intervaller</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde start</label>
+            <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" formControlName="work_start" required>
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Arbejde slut</label>
+            <input class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" type="time" formControlName="work_end" required>
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Intervallængde (minutter)</label>
+            <select class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" formControlName="slot_minutes" required>
+              @for(m of [1,5,10,15,20,30,60]; track m) { <option [value]="m">{{m}}</option> }
+            </select>
+          </div>
         </div>
-      </div>
-
-      <div class="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
-        <div class="flex flex-col gap-1">
-          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira project key</label>
-          <input type="text" formControlName="jira_project_key" placeholder="fx TEAMJYFWEB"
-            class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-          <p class="text-xs text-slate-500 dark:text-slate-400">Bruges i JQL-filteret for autocomplete under Udvikling Projekter.</p>
+        <div class="flex flex-col gap-2 mt-4">
+          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Aktive ugedage</label>
+          <div class="flex flex-wrap gap-2" role="group" aria-label="Aktive ugedage">
+            @for(d of days; track d; let i = $index;) {
+              <button type="button" (click)="toggleWeekday(i)" [attr.aria-pressed]="weekdayState()[i]"
+                class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                [class]="weekdayState()[i] ? 'border-indigo-600 bg-indigo-600 text-white dark:bg-indigo-500 dark:border-indigo-500' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-400 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
+                {{d}}
+              </button>
+            }
+          </div>
         </div>
-        <div class="flex flex-col gap-1">
-          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira PSA key</label>
-          <input type="password" formControlName="jira_psa_key" placeholder="Indsæt PSA key"
-            class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-          <p class="text-xs text-slate-500 dark:text-slate-400">Bruges som <strong>Bearer</strong> token mod Jira API for forslag.</p>
+      </section>
+
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
+        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Jira og Afstem</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira project key</label>
+            <input type="text" formControlName="jira_project_key" placeholder="fx TEAMJYFWEB"
+              class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+            <p class="text-xs text-slate-500 dark:text-slate-400">Bruges i JQL-filteret for autocomplete under Udvikling Projekter.</p>
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira PSA key</label>
+            <input type="password" formControlName="jira_psa_key" placeholder="Indsæt PSA key"
+              class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+            <p class="text-xs text-slate-500 dark:text-slate-400">Bruges som <strong>Bearer</strong> token mod Jira API for forslag.</p>
+          </div>
         </div>
-      </div>
+        @if(settingsForm.controls.jira_psa_key.value) {
+          <div class="flex items-start gap-3 mt-3">
+            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="jira_log_on_afstem" aria-describedby="jira-log-afstem-help">
+              <span class="leading-tight">
+                Log arbejdstid til Jira ved Afstem
+                <span id="jira-log-afstem-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Når du afstemmer en dag, vises en bekræftelsesdialog og tidsregistreringer under <strong>Udvikling Projekter</strong> med en Jira-nøgle i beskrivelsen logges automatisk til det tilsvarende Jira-issue.</span>
+              </span>
+            </label>
+          </div>
+        }
+      </section>
 
-      <div class="md:col-span-3 flex items-start gap-3 mt-2">
-        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_focus_on_slot" aria-describedby="auto-focus-help">
-          <span class="leading-tight">
-            Bring vinduet i front og åbn logdialogen automatisk når et interval er afsluttet
-            <span id="auto-focus-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for aktiv/påtrængende påmindelse. Deaktiver hvis du kun ønsker passive notifikationer.</span>
-          </span>
-        </label>
-      </div>
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
+        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Notifikationer</h3>
+        <div class="space-y-3">
+          <div class="flex items-start gap-3">
+            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_focus_on_slot" aria-describedby="auto-focus-help">
+              <span class="leading-tight">
+                Bring vinduet i front og åbn logdialogen automatisk når et interval er afsluttet
+                <span id="auto-focus-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for aktiv/påtrængende påmindelse. Deaktiver hvis du kun ønsker passive notifikationer.</span>
+              </span>
+            </label>
+          </div>
 
-      <div class="md:col-span-3 flex items-start gap-3">
-        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="notification_silent" aria-describedby="notif-silent-help">
-          <span class="leading-tight">
-            Stille notifikationer (ingen lyd)
-            <span id="notif-silent-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Fjern markering for at tillade systemlyd når et nyt interval er klar.</span>
-          </span>
-        </label>
-      </div>
+          <div class="flex items-start gap-3">
+            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="notification_silent" aria-describedby="notif-silent-help">
+              <span class="leading-tight">
+                Stille notifikationer (ingen lyd)
+                <span id="notif-silent-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Fjern markering for at tillade systemlyd når et nyt interval er klar.</span>
+              </span>
+            </label>
+          </div>
 
-      <div class="md:col-span-3 flex flex-col gap-2 mt-2">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Stale interval tærskel (minutter)</label>
-  <input type="number" min="1" formControlName="stale_threshold_minutes"
-          class="w-40 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" aria-describedby="stale-help" />
-  <p id="stale-help" class="text-xs text-slate-500 dark:text-slate-400">Når et ulogget interval overstiger denne grænse, vises en påmindelse om at registrere tiden.</p>
-      </div>
+          <div class="flex items-start gap-3">
+            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="group_notifications" aria-describedby="group-notif-help">
+              <span class="leading-tight">
+                Gruppér notifikationer når væk
+                <span id="group-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Akkumuler flere intervaller til én opsummering hvis du er væk fra computeren.</span>
+              </span>
+            </label>
+          </div>
 
-      <div class="md:col-span-3 flex items-start gap-3">
-        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_start_on_login" aria-describedby="auto-start-help">
-          <span class="leading-tight">
-            Start automatisk ved login
-            <span id="auto-start-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for at starte appen når du logger ind på systemet.</span>
-          </span>
-        </label>
-      </div>
+          <div class="flex items-start gap-3">
+            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="minimize_after_notification_submit" aria-describedby="minimize-after-notif-help">
+              <span class="leading-tight">
+                Minimer appen igen efter logning fra notifikation
+                <span id="minimize-after-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Når logdialogen er åbnet fra en notifikation og du gemmer en registrering, minimeres vinduet automatisk så du hurtigt kan fortsætte arbejdet.</span>
+              </span>
+            </label>
+          </div>
 
-      <div class="md:col-span-3 flex items-start gap-3">
-        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="group_notifications" aria-describedby="group-notif-help">
-          <span class="leading-tight">
-            Gruppér notifikationer når væk
-            <span id="group-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Akkumuler flere intervaller til én opsummering hvis du er væk fra computeren.</span>
-          </span>
-        </label>
-      </div>
-
-      <div class="md:col-span-3 flex items-start gap-3">
-        <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="minimize_after_notification_submit" aria-describedby="minimize-after-notif-help">
-          <span class="leading-tight">
-            Minimer appen igen efter logning fra notifikation
-            <span id="minimize-after-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Når logdialogen er åbnet fra en notifikation og du gemmer en registrering, minimeres vinduet automatisk så du hurtigt kan fortsætte arbejdet.</span>
-          </span>
-        </label>
-      </div>
-
-      <div class="md:col-span-3 flex flex-col gap-2">
-        <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Tema</label>
-        <div class="flex items-center gap-3" role="group" aria-label="Tema valg">
-          <button type="button" (click)="theme.setMode('light')"
-            aria-label="Skift til lyst tema" [attr.aria-pressed]="theme.mode()==='light'"
-            class="inline-flex items-center rounded-md px-3 h-8 text-xs font-medium border transition"
-            [class]="theme.mode()==='light' ? 'border-amber-500 bg-amber-500 text-white shadow' : 'border-slate-300 bg-white text-slate-600 hover:border-amber-400 hover:text-amber-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
-            Lys
-          </button>
-          <button type="button" (click)="theme.setMode('dark')"
-            aria-label="Skift til mørkt tema" [attr.aria-pressed]="theme.mode()==='dark'"
-            class="inline-flex items-center rounded-md px-3 h-8 text-xs font-medium border transition"
-            [class]="theme.mode()==='dark' ? 'border-indigo-600 bg-indigo-600 text-white shadow' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-500 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
-            Mørk
-          </button>
+          <div class="flex flex-col gap-2 pt-1">
+            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Stale interval tærskel (minutter)</label>
+            <input type="number" min="1" formControlName="stale_threshold_minutes"
+              class="w-40 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" aria-describedby="stale-help" />
+            <p id="stale-help" class="text-xs text-slate-500 dark:text-slate-400">Når et ulogget interval overstiger denne grænse, vises en påmindelse om at registrere tiden.</p>
+          </div>
         </div>
-        <p class="text-xs text-slate-500 dark:text-slate-400">Standard er mørkt tema. App styrer nu tema fuldstændigt – systemets indstilling ignoreres.</p>
-      </div>
+      </section>
 
-      <div class="md:col-span-3 mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
+        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">App og Tema</h3>
+        <div class="space-y-3">
+          <div class="flex items-start gap-3">
+            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_start_on_login" aria-describedby="auto-start-help">
+              <span class="leading-tight">
+                Start automatisk ved login
+                <span id="auto-start-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for at starte appen når du logger ind på systemet.</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Tema</label>
+            <div class="flex items-center gap-3" role="group" aria-label="Tema valg">
+              <button type="button" (click)="theme.setMode('light')"
+                aria-label="Skift til lyst tema" [attr.aria-pressed]="theme.mode()==='light'"
+                class="inline-flex items-center rounded-md px-3 h-8 text-xs font-medium border transition"
+                [class]="theme.mode()==='light' ? 'border-amber-500 bg-amber-500 text-white shadow' : 'border-slate-300 bg-white text-slate-600 hover:border-amber-400 hover:text-amber-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
+                Lys
+              </button>
+              <button type="button" (click)="theme.setMode('dark')"
+                aria-label="Skift til mørkt tema" [attr.aria-pressed]="theme.mode()==='dark'"
+                class="inline-flex items-center rounded-md px-3 h-8 text-xs font-medium border transition"
+                [class]="theme.mode()==='dark' ? 'border-indigo-600 bg-indigo-600 text-white shadow' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-500 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
+                Mørk
+              </button>
+            </div>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Standard er mørkt tema. App styrer nu tema fuldstændigt – systemets indstilling ignoreres.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 px-1">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-  {{totalWorkMinutes()}} minutter planlagt • ca. {{ (totalWorkMinutes()/60) | number:'1.2-2' }} timer
+        {{totalWorkMinutes()}} minutter planlagt • ca. {{ (totalWorkMinutes()/60) | number:'1.2-2' }} timer
         • ca. {{ (totalWorkMinutes() / settingsForm.controls.slot_minutes.value) | number:'1.0-0' }} logposter pr. dag
       </div>
     </form>

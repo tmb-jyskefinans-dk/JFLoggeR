@@ -4,13 +4,12 @@ import { WindowControlsComponent } from './components/window-controls/window-con
 import { IpcService } from './services/ipc.service';
 import { ClockService } from './services/clock.service';
 import { LogDialogComponent } from './components/log-dialog/log-dialog.component';
-import { ManualLogComponent } from './components/manual-log/manual-log.component';
 import { ThemeService } from './services/theme.service';
 
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, RouterOutlet, LogDialogComponent, ManualLogComponent, WindowControlsComponent],
+  imports: [RouterLink, RouterOutlet, LogDialogComponent, WindowControlsComponent],
   templateUrl: "./app.component.html",
   styleUrls: []
 })

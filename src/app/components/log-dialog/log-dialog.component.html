@@ -4,12 +4,13 @@
     <header class="flex items-start justify-between px-6 py-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-t-xl">
       <div class="space-y-1">
   <h2 id="logDialogTitle" class="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Registrér tid</h2>
-  <p class="text-xs text-slate-500 dark:text-slate-400">Registrér arbejde udført i tidsintervaller</p>
+  <p class="text-xs text-slate-500 dark:text-slate-400">{{ manualMode() ? 'Manuel registrering — angiv dato og tid' : 'Registrér arbejde udført i tidsintervaller' }}</p>
       </div>
       <button type="button" (click)="closed.emit()" aria-label="Close"
         class="text-xl leading-none px-2 py-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition">×</button>
     </header>
 
+    @if(!manualMode()) {
     <section class="px-6">
       <div class="flex items-center gap-3 mb-2">
         <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Ikke registrerede intervaller</h3>
@@ -45,6 +46,33 @@
       </div>
   <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Klik for at vælge/fravælge. Valgte intervaller viser et hak og en markering.</p>
     </section>
+    }
+
+    @if(manualMode()) {
+    <section class="px-6">
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">Dato og tid</h3>
+      <div class="grid grid-cols-3 gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Dato</label>
+          <input type="date" [ngModel]="manualDate()" (ngModelChange)="manualDate.set($event)" name="manualDate" required
+            class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Start</label>
+          <input type="time" [ngModel]="manualStart()" (ngModelChange)="manualStart.set($event)" name="manualStart" required
+            class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Slut</label>
+          <input type="time" [ngModel]="manualEnd()" (ngModelChange)="manualEnd.set($event)" name="manualEnd" required
+            class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
+        </div>
+      </div>
+      @if(manualError()) {
+        <p class="text-xs text-rose-600 dark:text-rose-400 mt-2">{{manualError()}}</p>
+      }
+    </section>
+    }
 
     <section class="px-6">
   <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Genbrug seneste</h3>
@@ -133,7 +161,7 @@
       <div class="flex gap-3 justify-end w-full">
         <button type="button" (click)="closed.emit()"
           class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition">Annuller</button>
-        <button #submitBtn type="submit" [disabled]="selectedSlots().length===0 || !category().trim() || (category()!=='Andet' ? !description().trim() : !andetDescription().trim())"
+        <button #submitBtn type="submit" [disabled]="(manualMode() ? (!manualDate() || !manualStart() || !manualEnd()) : selectedSlots().length===0) || !category().trim() || (category()!=='Andet' ? !description().trim() : !andetDescription().trim())"
           class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition">Gem registrering</button>
       </div>
     </footer>

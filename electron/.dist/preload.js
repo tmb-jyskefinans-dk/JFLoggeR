@@ -25,6 +25,7 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     signInMicrosoft: () => electron_1.ipcRenderer.invoke('auth:signin'),
     signOutMicrosoft: () => electron_1.ipcRenderer.invoke('auth:signout'),
     jiraSearchIssues: (term) => electron_1.ipcRenderer.invoke('jira:search-issues', { term }),
+    jiraLogWorklog: (day) => electron_1.ipcRenderer.invoke('jira:log-worklog', { day }),
     // Events from main (notifications clicked)
     onPrompt: (cb) => {
         const handler = (_e, d) => cb(d);

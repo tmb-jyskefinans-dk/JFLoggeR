@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('workApi', {
   signInMicrosoft: () => ipcRenderer.invoke('auth:signin'),
   signOutMicrosoft: () => ipcRenderer.invoke('auth:signout'),
   jiraSearchIssues: (term: string) => ipcRenderer.invoke('jira:search-issues', { term }),
+  jiraLogWorklog: (day: string) => ipcRenderer.invoke('jira:log-worklog', { day }),
 
   // Events from main (notifications clicked)
   onPrompt: (cb: (d: any) => void) => {

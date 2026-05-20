@@ -47,7 +47,8 @@ export class SettingsComponent {
     stale_threshold_minutes: 45,
     auto_start_on_login: false,
     group_notifications: true,
-    minimize_after_notification_submit: false
+    minimize_after_notification_submit: false,
+    jira_log_on_afstem: false
   });
 
   private settingsValue = toSignal(this.settingsForm.valueChanges, {
@@ -57,6 +58,8 @@ export class SettingsComponent {
   authBusy = signal<boolean>(false);
   authError = signal<string>('');
   authStatus = this.ipc.authStatus;
+  saveToast = signal<{ message: string; kind: 'success' | 'error' } | null>(null);
+  private saveToastTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Import feature signals
   importText = signal<string>('');
@@ -102,7 +105,8 @@ export class SettingsComponent {
         (Number(s.stale_threshold_minutes) !== Number(v.stale_threshold_minutes)) ||
         (!!s.auto_start_on_login !== !!v.auto_start_on_login) ||
           (!!s.group_notifications !== !!v.group_notifications) ||
-          (!!s.minimize_after_notification_submit !== !!v.minimize_after_notification_submit);
+          (!!s.minimize_after_notification_submit !== !!v.minimize_after_notification_submit) ||
+          (!!s.jira_log_on_afstem !== !!v.jira_log_on_afstem);
   });
 
   constructor() {
@@ -137,7 +141,8 @@ export class SettingsComponent {
       stale_threshold_minutes: Number(s.stale_threshold_minutes) || 45,
       auto_start_on_login: !!s.auto_start_on_login,
       group_notifications: !!s.group_notifications,
-      minimize_after_notification_submit: !!s.minimize_after_notification_submit
+      minimize_after_notification_submit: !!s.minimize_after_notification_submit,
+      jira_log_on_afstem: !!s.jira_log_on_afstem
     });
   }
 
@@ -158,15 +163,27 @@ export class SettingsComponent {
       stale_threshold_minutes: Number(raw.stale_threshold_minutes),
       auto_start_on_login: raw.auto_start_on_login,
       group_notifications: raw.group_notifications,
-      minimize_after_notification_submit: raw.minimize_after_notification_submit
+      minimize_after_notification_submit: raw.minimize_after_notification_submit,
+      jira_log_on_afstem: raw.jira_log_on_afstem
     };
     try {
       await this.ipc.saveSettings(payload);
       // Update baseline after successful save for accurate change detection.
       this.initialSettings.set(payload);
+      this.showSaveToast('Indstillinger gemt.', 'success');
     } catch {
       // Keep baseline unchanged on failure so user can retry save.
+      this.showSaveToast('Gemning fejlede. Prøv igen.', 'error');
     }
+  }
+
+  private showSaveToast(message: string, kind: 'success' | 'error') {
+    this.saveToast.set({ message, kind });
+    if (this.saveToastTimer) clearTimeout(this.saveToastTimer);
+    this.saveToastTimer = setTimeout(() => {
+      this.saveToast.set(null);
+      this.saveToastTimer = null;
+    }, 2800);
   }
 
   reset() {

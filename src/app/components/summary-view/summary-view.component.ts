@@ -1,7 +1,7 @@
 import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, AfterViewInit, OnDestroy } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { IpcService, SummaryRow } from '../../services/ipc.service';
+import { IpcService, JiraWorklogResult, SummaryRow } from '../../services/ipc.service';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { getCategoryColor } from '../../models/category-colors';
@@ -27,11 +27,37 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   day = computed(() => this.paramMap()?.get('ymd') ?? '');
 
   loading = signal(false);
+  // Jira worklog confirmation state
+  jiraConfirming = signal(false);
+  jiraLogging = signal(false);
+  jiraResult = signal<JiraWorklogResult | null>(null);
+  jiraUnsetConfirming = signal(false);
 
   rows = computed<SummaryRow[]>(() => this.ipc.summary());
   totalSlots = computed(() => this.rows().reduce((a, r) => a + r.slots, 0));
   totalMinutes = computed(() => this.rows().reduce((a, r) => a + r.minutes, 0));
   // External exported status for current day
+    private readonly jiraCategories = new Set([
+      'Udvikling (prioriterede jf. projektoversigten)',
+      'Estimering'
+    ]);
+
+    /** Rows eligible for Jira worklog: in 'Udvikling Projekter' group + description has a parseable key */
+    jiraWorklogRows = computed(() =>
+      this.rows().filter(r =>
+        this.jiraCategories.has(r.category) &&
+        /^[A-Z]+-\d+\s*-\s*/.test(r.description)
+      )
+    );
+
+    jiraKeyFromRow(r: SummaryRow): string {
+      return r.description.match(/^([A-Z]+-\d+)/)?.[1] ?? '';
+    }
+
+    jiraSummaryFromRow(r: SummaryRow): string {
+      return r.description.replace(/^[A-Z]+-\d+\s*-\s*/, '').trim();
+    }
+
   exported = computed(() => this.ipc.dayExported().get(this.day()) ?? false);
   // Grouped totals by category
   // Category totals aggregated, but ordered by CATEGORY_GROUPS definition rather than by minutes
@@ -183,7 +209,49 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
     const day = this.day();
     if (!day) return;
     const checked = (ev.target as HTMLInputElement).checked;
-    this.ipc.setDayExported(day, checked);
+    const warnOnUnset = !!this.ipc.settings()?.jira_log_on_afstem;
+    if (!checked && warnOnUnset && this.jiraWorklogRows().length > 0) {
+      this.jiraUnsetConfirming.set(true);
+      return;
+    }
+    if (checked && this.ipc.settings()?.jira_log_on_afstem && this.ipc.settings()?.jira_psa_key) {
+      this.jiraConfirming.set(true);
+    } else {
+      this.ipc.setDayExported(day, checked);
+    }
+  }
+
+  cancelJiraUnsetConfirm() {
+    this.jiraUnsetConfirming.set(false);
+  }
+
+  confirmJiraUnset() {
+    const day = this.day();
+    if (!day) return;
+    this.ipc.setDayExported(day, false);
+    this.jiraUnsetConfirming.set(false);
+  }
+
+  cancelJiraConfirm() {
+    this.jiraConfirming.set(false);
+    this.jiraResult.set(null);
+  }
+
+  async confirmJiraLog() {
+    const day = this.day();
+    if (!day) return;
+    this.jiraLogging.set(true);
+    try {
+      const result = await this.ipc.logWorkToJira(day);
+      this.jiraResult.set(result);
+      this.jiraConfirming.set(false);
+      await this.ipc.setDayExported(day, true);
+    } catch {
+      this.jiraResult.set({ ok: false, error: 'Uventet fejl under Jira logning.' });
+      this.jiraConfirming.set(false);
+    } finally {
+      this.jiraLogging.set(false);
+    }
   }
 
   // Keyboard shortcuts: ArrowLeft / ArrowRight for day nav, 't' for today

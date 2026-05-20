@@ -23,6 +23,26 @@ export class DayViewComponent implements OnDestroy {
   day = signal<string>('');
   isTodayView = signal(false);
   selectedMissingSlots = signal<string[]>([]);
+  archiveJiraConfirmOpen = signal(false);
+  archiveJiraConfirmDay = signal('');
+  archiveJiraConfirmRows = signal<Array<{ description: string; category: string; minutes: number }>>([]);
+  archiveJiraConfirmLoading = signal(false);
+  archiveJiraConfirmSubmitting = signal(false);
+  archiveJiraConfirmError = signal('');
+  archiveJiraUnsetConfirmOpen = signal(false);
+  archiveJiraUnsetConfirmDay = signal('');
+  private readonly jiraCategories = new Set([
+    'Udvikling (prioriterede jf. projektoversigten)',
+    'Estimering'
+  ]);
+
+  archiveJiraKey(description: string): string {
+    return String(description ?? '').match(/^([A-Z]+-\d+)/)?.[1] ?? '';
+  }
+
+  archiveJiraSummary(description: string): string {
+    return String(description ?? '').replace(/^[A-Z]+-\d+\s*-\s*/, '').trim();
+  }
 
   // Category edit state
   editingKey = signal<string|null>(null);
@@ -406,7 +426,104 @@ export class DayViewComponent implements OnDestroy {
   toggleExportedDot(day: string) {
     if (!day) return;
     const current = this.ipc.dayExported().get(day) || false;
-    this.ipc.setDayExported(day, !current);
+    const next = !current;
+    if (!next) {
+      void this.handleArchiveUnset(day);
+      return;
+    }
+    const shouldUseJiraFlow = next && !!this.ipc.settings()?.jira_log_on_afstem && !!this.ipc.settings()?.jira_psa_key;
+    if (shouldUseJiraFlow) {
+      void this.openArchiveJiraConfirm(day);
+      return;
+    }
+    this.ipc.setDayExported(day, next);
+  }
+
+  private async handleArchiveUnset(day: string) {
+    const warnOnUnset = !!this.ipc.settings()?.jira_log_on_afstem;
+    if (!warnOnUnset) {
+      this.ipc.setDayExported(day, false);
+      return;
+    }
+    const hasJiraIntervals = await this.archiveDayHasJiraLinkedIntervals(day);
+    if (hasJiraIntervals) {
+      this.archiveJiraUnsetConfirmDay.set(day);
+      this.archiveJiraUnsetConfirmOpen.set(true);
+      return;
+    }
+    this.ipc.setDayExported(day, false);
+  }
+
+  private async archiveDayHasJiraLinkedIntervals(day: string): Promise<boolean> {
+    try {
+      const rows = await window.workApi.getSummary(day) as Array<{ description: string; category: string; minutes: number }>;
+      return (rows ?? []).some(r =>
+        this.jiraCategories.has(r.category) && /^[A-Z]+-\d+\s*-\s*/.test(r.description)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  closeArchiveJiraUnsetConfirm() {
+    this.archiveJiraUnsetConfirmOpen.set(false);
+    this.archiveJiraUnsetConfirmDay.set('');
+  }
+
+  confirmArchiveJiraUnset() {
+    const day = this.archiveJiraUnsetConfirmDay();
+    if (!day) return;
+    this.ipc.setDayExported(day, false);
+    this.closeArchiveJiraUnsetConfirm();
+  }
+
+  private async openArchiveJiraConfirm(day: string) {
+    this.archiveJiraConfirmError.set('');
+    this.archiveJiraConfirmLoading.set(true);
+    this.archiveJiraConfirmDay.set(day);
+    this.archiveJiraConfirmRows.set([]);
+    this.archiveJiraConfirmOpen.set(true);
+    try {
+      const rows = await window.workApi.getSummary(day) as Array<{ description: string; category: string; minutes: number }>;
+      const eligible = (rows ?? []).filter(r =>
+        this.jiraCategories.has(r.category) && /^[A-Z]+-\d+\s*-\s*/.test(r.description)
+      );
+      this.archiveJiraConfirmRows.set(eligible);
+    } catch {
+      this.archiveJiraConfirmError.set('Kunne ikke hente preview for Jira-logning.');
+      this.archiveJiraConfirmRows.set([]);
+    } finally {
+      this.archiveJiraConfirmLoading.set(false);
+    }
+  }
+
+  closeArchiveJiraConfirm() {
+    this.archiveJiraConfirmOpen.set(false);
+    this.archiveJiraConfirmDay.set('');
+    this.archiveJiraConfirmRows.set([]);
+    this.archiveJiraConfirmLoading.set(false);
+    this.archiveJiraConfirmSubmitting.set(false);
+    this.archiveJiraConfirmError.set('');
+  }
+
+  async confirmArchiveJiraLog() {
+    const day = this.archiveJiraConfirmDay();
+    if (!day) return;
+    this.archiveJiraConfirmSubmitting.set(true);
+    this.archiveJiraConfirmError.set('');
+    try {
+      const result = await this.ipc.logWorkToJira(day);
+      if (!result.ok) {
+        this.archiveJiraConfirmError.set(result.error || 'Jira logning fejlede.');
+        return;
+      }
+      await this.ipc.setDayExported(day, true);
+      this.closeArchiveJiraConfirm();
+    } catch {
+      this.archiveJiraConfirmError.set('Uventet fejl under Jira logning.');
+    } finally {
+      this.archiveJiraConfirmSubmitting.set(false);
+    }
   }
 
   isMonthExpanded(monthKey: string) {

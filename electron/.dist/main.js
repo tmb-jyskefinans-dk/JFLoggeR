@@ -376,9 +376,7 @@ function scheduleTicker() {
                 const key = (0, time_1.slotKey)(prevStart);
                 // Guard against re-queueing already logged slot
                 const day = (0, time_1.toLocalDateYMD)(prevStart);
-                const hh = `${prevStart.getHours()}`.padStart(2, '0');
-                const mm = `${prevStart.getMinutes()}`.padStart(2, '0');
-                const alreadyLogged = (0, db_1.getDayEntries)(day).some(e => e.day === day && e.start === `${hh}:${mm}`);
+                const alreadyLogged = isSlotCoveredByEntries(prevStart, (0, db_1.getDayEntries)(day));
                 if (!alreadyLogged) {
                     enqueuePending(key); // emits queue:updated
                     try {
@@ -457,11 +455,28 @@ function scheduleStaleCheck() {
         catch { /* ignore */ }
     }, 60000);
 }
+function hmToMinutes(hm) {
+    const { h, m } = (0, time_1.parseHM)(String(hm ?? '00:00'));
+    return h * 60 + m;
+}
+/** Returns true when slot start is already covered by an existing logged interval on that day. */
+function isSlotCoveredByEntries(slotStart, entries) {
+    const slotStartMinutes = slotStart.getHours() * 60 + slotStart.getMinutes();
+    for (const e of entries) {
+        const startM = hmToMinutes(e.start);
+        const endM = hmToMinutes(e.end);
+        if (!Number.isFinite(startM) || !Number.isFinite(endM) || endM <= startM)
+            continue;
+        if (slotStartMinutes >= startM && slotStartMinutes < endM)
+            return true;
+    }
+    return false;
+}
 function rebuildBacklogForToday({ includeFuture = false } = {}) {
     // Build backlog only for finished unlogged slots.
     const now = new Date();
     const day = (0, time_1.toLocalDateYMD)(now);
-    const done = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
+    const dayEntries = (0, db_1.getDayEntries)(day);
     pending.clear();
     const slots = (0, time_1.daySlots)(now); // already filtered by workday
     if (!slots.length) {
@@ -475,7 +490,7 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
         if (!includeFuture && slotEnd.getTime() > now.getTime())
             break; // stop at first slot that hasn't ended
         const key = (0, time_1.slotKey)(slot);
-        if (!done.has(key))
+        if (!isSlotCoveredByEntries(slot, dayEntries))
             enqueuePending(key, { silent: true });
     }
     // Single emit after bulk rebuild
@@ -489,7 +504,7 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
 function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
     const now = new Date();
     const day = (0, time_1.toLocalDateYMD)(now);
-    const existing = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
+    const dayEntries = (0, db_1.getDayEntries)(day);
     pending.clear();
     const slots = (0, time_1.daySlots)(now);
     if (!slots.length) {
@@ -500,18 +515,16 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
         // Only add to pending if the slot's END time is in the past
         const slotEnd = new Date(slot.getTime() + (0, time_1.getSlotMinutes)() * 60000);
         const key = (0, time_1.slotKey)(slot);
-        if (existing.has(key))
-            continue; // already logged
+        if (isSlotCoveredByEntries(slot, dayEntries))
+            continue; // already logged by an interval covering this slot
         if (!includeFuture && slotEnd.getTime() > now.getTime())
             break; // stop at first slot that hasn't ended
-        if (!doneOrLogged(key))
-            enqueuePending(key, { silent: true });
+        enqueuePending(key, { silent: true });
     }
     try {
         win?.webContents.send('queue:updated');
     }
     catch { }
-    function doneOrLogged(key) { return existing.has(key); }
 }
 function logIpcFailure(channel, err) {
     const error = err;
@@ -650,6 +663,106 @@ electron_1.ipcMain.handle('jira:search-issues', async (_e, payload) => {
         return { ok: false, error: 'Jira opslag fejlede.' };
     }
 });
+// Categories in 'Udvikling Projekter' group that support Jira worklog posting
+const JIRA_WORKLOG_CATEGORIES = new Set([
+    'Udvikling (prioriterede jf. projektoversigten)',
+    'Estimering'
+]);
+function postCorporateJiraJson(url, headers, body) {
+    return new Promise((resolve, reject) => {
+        const bodyStr = JSON.stringify(body);
+        const req = node_https_1.default.request(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
+            agent: corporateJiraAgent
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+            res.on('end', () => {
+                const bodyText = Buffer.concat(chunks).toString('utf8');
+                const status = res.statusCode ?? 500;
+                resolve({ status, ok: status >= 200 && status < 300, json: async () => bodyText ? JSON.parse(bodyText) : {} });
+            });
+        });
+        req.on('error', reject);
+        req.write(bodyStr);
+        req.end();
+    });
+}
+electron_1.ipcMain.handle('jira:log-worklog', async (_e, payload) => {
+    try {
+        const day = String(payload?.day ?? '').trim();
+        if (!day)
+            return { ok: false, error: 'Dag mangler.' };
+        const settings = (0, db_1.getSettings)();
+        const psaKey = String(settings.jira_psa_key ?? '').trim();
+        if (!psaKey)
+            return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+        const entries = (0, db_1.getDayEntries)(day).filter((e) => JIRA_WORKLOG_CATEGORIES.has(e.category));
+        if (!entries.length)
+            return { ok: true, results: [] };
+        // Aggregate seconds + earliest start per Jira key
+        const aggr = new Map();
+        for (const entry of entries) {
+            const m = entry.description?.match(/^([A-Z]+-\d+)\s*-\s*/);
+            if (!m)
+                continue;
+            const key = m[1];
+            const [sh, sm] = entry.start.split(':').map(Number);
+            const [eh, em] = entry.end.split(':').map(Number);
+            const seconds = ((eh * 60 + em) - (sh * 60 + sm)) * 60;
+            if (seconds <= 0)
+                continue;
+            const existing = aggr.get(key);
+            if (existing) {
+                existing.seconds += seconds;
+                if (entry.start < existing.earliest)
+                    existing.earliest = entry.start;
+            }
+            else {
+                aggr.set(key, { seconds, earliest: entry.start });
+            }
+        }
+        if (!aggr.size)
+            return { ok: true, results: [] };
+        const [y, mo, d] = day.split('-').map(Number);
+        const authHeaders = { Accept: 'application/json', Authorization: `Bearer ${psaKey}` };
+        const results = [];
+        for (const [key, { seconds, earliest }] of aggr) {
+            try {
+                const [hh, mm] = earliest.split(':').map(Number);
+                const started = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
+                const pad2 = (n) => String(n).padStart(2, '0');
+                const tz = -started.getTimezoneOffset();
+                const tzSign = tz >= 0 ? '+' : '-';
+                const tzH = pad2(Math.floor(Math.abs(tz) / 60));
+                const tzM = pad2(Math.abs(tz) % 60);
+                const startedStr = `${day}T${pad2(hh)}:${pad2(mm)}:00.000${tzSign}${tzH}${tzM}`;
+                const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/issue/${key}/worklog`;
+                const res = await postCorporateJiraJson(url, authHeaders, {
+                    timeSpentSeconds: seconds,
+                    started: startedStr,
+                    comment: 'Logged via JFLoggeR'
+                });
+                if (res.ok) {
+                    results.push({ key, seconds, success: true });
+                }
+                else {
+                    results.push({ key, seconds, success: false, error: `HTTP ${res.status}` });
+                }
+            }
+            catch (e) {
+                results.push({ key, seconds, success: false, error: String(e) });
+            }
+        }
+        const allOk = results.every(r => r.success);
+        return { ok: allOk, results };
+    }
+    catch (e) {
+        logIpcFailure('jira:log-worklog', e);
+        return { ok: false, error: 'Jira worklog fejlede.' };
+    }
+});
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
 electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
     try {
@@ -695,6 +808,7 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
         if (!description || !category)
             return { ok: false, error: 'Description and category are required' };
         const groupedByDay = new Map();
+        const coverageByDay = new Map();
         const consumedKeys = [];
         for (const k of payload.slots) {
             if (typeof k !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(k)) {
@@ -706,6 +820,16 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
             const mm = Number(m);
             if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
                 return { ok: false, error: `Invalid slot time: ${k}` };
+            }
+            if (!coverageByDay.has(day)) {
+                coverageByDay.set(day, (0, db_1.getDayEntries)(day).map(e => ({ start: e.start, end: e.end })));
+            }
+            const [y, mo, d] = day.split('-').map(Number);
+            const slotStart = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
+            const dayCoverage = coverageByDay.get(day);
+            if (isSlotCoveredByEntries(slotStart, dayCoverage)) {
+                consumedKeys.push(k);
+                continue;
             }
             const slotLen = (0, time_1.getSlotMinutes)();
             const endTotal = hh * 60 + mm + slotLen;
@@ -721,6 +845,7 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
             if (!groupedByDay.has(day))
                 groupedByDay.set(day, []);
             groupedByDay.get(day).push(entry);
+            dayCoverage.push({ start: entry.start, end: entry.end });
             consumedKeys.push(k);
         }
         groupedByDay.forEach((list) => (0, db_1.saveEntries)(list));
