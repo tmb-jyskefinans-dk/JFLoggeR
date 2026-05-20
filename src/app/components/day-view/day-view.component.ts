@@ -5,6 +5,8 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { IpcService } from '../../services/ipc.service';
 import { ClockService } from '../../services/clock.service';
+import { getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
+import { SnackbarService } from '../../services/snackbar.service';
 
 @Component({
   selector: 'day-view',
@@ -17,6 +19,7 @@ export class DayViewComponent implements OnDestroy {
   route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   clock = inject(ClockService);
+  snackbar = inject(SnackbarService);
   routeParamMap = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
 
   // Source signals
@@ -31,10 +34,6 @@ export class DayViewComponent implements OnDestroy {
   archiveJiraConfirmError = signal('');
   archiveJiraUnsetConfirmOpen = signal(false);
   archiveJiraUnsetConfirmDay = signal('');
-  private readonly jiraCategories = new Set([
-    'Udvikling (prioriterede jf. projektoversigten)',
-    'Estimering'
-  ]);
 
   archiveJiraKey(description: string): string {
     return String(description ?? '').match(/^([A-Z]+-\d+)/)?.[1] ?? '';
@@ -243,6 +242,10 @@ export class DayViewComponent implements OnDestroy {
     const dt = new Date(y, (m||1)-1, d||1);
     return `${this.weekdayNames[dt.getDay()]} ${ymd}`;
   });
+  dayLocked = computed(() => {
+    const day = this.day();
+    return !!day && !!this.ipc.dayExported().get(day);
+  });
   daysWithWeekday = computed(() => this.days().map(d => {
     const [y,m,dd] = d.day.split('-').map(Number);
     const dt = new Date(y,(m||1)-1,dd||1);
@@ -363,6 +366,7 @@ export class DayViewComponent implements OnDestroy {
   }
 
   remove(e: any) {
+    if (this.dayLocked()) return;
     if (!e || !e.day || !e.start) return;
     this.ipc.deleteEntry(e.day, e.start);
   }
@@ -374,6 +378,7 @@ export class DayViewComponent implements OnDestroy {
   }
 
   toggleMissingSelection(start: string) {
+    if (this.dayLocked()) return;
     const day = this.day();
     if (!day || !start) return;
     const key = `${day}T${start}`;
@@ -383,11 +388,13 @@ export class DayViewComponent implements OnDestroy {
   }
 
   toggleAllMissingSelection() {
+    if (this.dayLocked()) return;
     if (this.allMissingSelected()) this.selectedMissingSlots.set([]);
     else this.selectedMissingSlots.set([...this.missingSlotKeys()].sort());
   }
 
   logSelectedMissing() {
+    if (this.dayLocked()) return;
     const selected = this.selectedMissingSlots();
     if (!selected.length) return;
     const currentPending = new Set(this.ipc.pendingSlots());
@@ -401,6 +408,7 @@ export class DayViewComponent implements OnDestroy {
 
   /** Add a missing slot to the pending list & open the log dialog pre-selecting it. */
   logMissing(start: string) {
+    if (this.dayLocked()) return;
     const day = this.day();
     if (!day || !start) return;
     const slotKey = `${day}T${start}`;
@@ -431,7 +439,7 @@ export class DayViewComponent implements OnDestroy {
       void this.handleArchiveUnset(day);
       return;
     }
-    const shouldUseJiraFlow = next && !!this.ipc.settings()?.jira_log_on_afstem && !!this.ipc.settings()?.jira_psa_key;
+    const shouldUseJiraFlow = next && shouldJiraAutoLogOnAfstem(this.ipc.settings());
     if (shouldUseJiraFlow) {
       void this.openArchiveJiraConfirm(day);
       return;
@@ -457,9 +465,7 @@ export class DayViewComponent implements OnDestroy {
   private async archiveDayHasJiraLinkedIntervals(day: string): Promise<boolean> {
     try {
       const rows = await window.workApi.getSummary(day) as Array<{ description: string; category: string; minutes: number }>;
-      return (rows ?? []).some(r =>
-        this.jiraCategories.has(r.category) && /^[A-Z]+-\d+\s*-\s*/.test(r.description)
-      );
+      return getJiraAfstemRows(rows ?? []).length > 0;
     } catch {
       return false;
     }
@@ -482,16 +488,22 @@ export class DayViewComponent implements OnDestroy {
     this.archiveJiraConfirmLoading.set(true);
     this.archiveJiraConfirmDay.set(day);
     this.archiveJiraConfirmRows.set([]);
-    this.archiveJiraConfirmOpen.set(true);
+    this.archiveJiraConfirmOpen.set(false);
     try {
       const rows = await window.workApi.getSummary(day) as Array<{ description: string; category: string; minutes: number }>;
-      const eligible = (rows ?? []).filter(r =>
-        this.jiraCategories.has(r.category) && /^[A-Z]+-\d+\s*-\s*/.test(r.description)
-      );
+      const eligible = getJiraAfstemRows(rows ?? []);
+      if (!eligible.length) {
+        this.ipc.setDayExported(day, true);
+        this.snackbar.show('Afstemt gennemført. Ingen tid logget til Jira.');
+        this.closeArchiveJiraConfirm();
+        return;
+      }
       this.archiveJiraConfirmRows.set(eligible);
+      this.archiveJiraConfirmOpen.set(true);
     } catch {
       this.archiveJiraConfirmError.set('Kunne ikke hente preview for Jira-logning.');
       this.archiveJiraConfirmRows.set([]);
+      this.archiveJiraConfirmOpen.set(true);
     } finally {
       this.archiveJiraConfirmLoading.set(false);
     }

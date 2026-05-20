@@ -6,6 +6,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { getCategoryColor } from '../../models/category-colors';
 import { ExportService } from '../../services/export.service';
+import { getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
+import { SnackbarService } from '../../services/snackbar.service';
 
 @Component({
   selector: 'summary-view',
@@ -21,6 +23,7 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   private route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   exporter = inject(ExportService);
+  private snackbar = inject(SnackbarService);
   private router = inject(Router);
 
   private paramMap = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
@@ -37,18 +40,8 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   totalSlots = computed(() => this.rows().reduce((a, r) => a + r.slots, 0));
   totalMinutes = computed(() => this.rows().reduce((a, r) => a + r.minutes, 0));
   // External exported status for current day
-    private readonly jiraCategories = new Set([
-      'Udvikling (prioriterede jf. projektoversigten)',
-      'Estimering'
-    ]);
-
-    /** Rows eligible for Jira worklog: in 'Udvikling Projekter' group + description has a parseable key */
-    jiraWorklogRows = computed(() =>
-      this.rows().filter(r =>
-        this.jiraCategories.has(r.category) &&
-        /^[A-Z]+-\d+\s*-\s*/.test(r.description)
-      )
-    );
+    /** Rows eligible for Jira worklog: shared afstem rule */
+    jiraWorklogRows = computed(() => getJiraAfstemRows(this.rows()));
 
     jiraKeyFromRow(r: SummaryRow): string {
       return r.description.match(/^([A-Z]+-\d+)/)?.[1] ?? '';
@@ -164,9 +157,7 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
 
   private lastRequest = 0;
   private initialized = false;
-  private toastTimeout: ReturnType<typeof setTimeout> | null = null;
   private animationTimeout: ReturnType<typeof setTimeout> | null = null;
-  toast = signal<string | null>(null);
 
   // Navigation helpers
   // Format a Date as local YYYY-MM-DD without timezone shifting to UTC
@@ -214,7 +205,12 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
       this.jiraUnsetConfirming.set(true);
       return;
     }
-    if (checked && this.ipc.settings()?.jira_log_on_afstem && this.ipc.settings()?.jira_psa_key) {
+    if (checked && shouldJiraAutoLogOnAfstem(this.ipc.settings())) {
+      if (this.jiraWorklogRows().length === 0) {
+        this.ipc.setDayExported(day, true);
+        this.snackbar.show('Afstemt gennemført. Ingen tid logget til Jira.');
+        return;
+      }
       this.jiraConfirming.set(true);
     } else {
       this.ipc.setDayExported(day, checked);
@@ -277,7 +273,7 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
       if (typeof msg === 'string' && msg.trim()) {
         // Defer toast until after first data load so we don't conflict with initial day-change toast
         this.initialized = true; // prevent day-change toast overriding manual registration confirmation
-        setTimeout(() => this.showToast(msg.trim()), 50);
+        setTimeout(() => this.snackbar.show(msg.trim()), 50);
       }
     } catch { }
     effect(() => {
@@ -291,7 +287,7 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
           this.loading.set(false);
           // Day change toast (skip first initialization)
           if (this.initialized) {
-            this.showToast(`Dag ændret til ${d}`);
+            this.snackbar.show(`Dag ændret til ${d}`);
           } else {
             this.initialized = true;
           }
@@ -307,19 +303,10 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
     const result = await this.exporter.exportDaySummary(d);
     if (!result.ok) {
       console.error('[summary] export failed', result.error);
-      this.showToast('Eksport fejlede. Prøv igen.');
+      this.snackbar.show('Eksport fejlede. Prøv igen.');
       return;
     }
-    this.showToast(`Eksporteret: ${result.filename}`);
-  }
-
-  private showToast(msg: string) {
-    this.toast.set(msg);
-    if (this.toastTimeout) clearTimeout(this.toastTimeout);
-    this.toastTimeout = setTimeout(() => {
-      this.toast.set(null);
-      this.toastTimeout = null;
-    }, 3000);
+    this.snackbar.show(`Eksporteret: ${result.filename}`);
   }
 
   ngAfterViewInit() {
@@ -350,9 +337,7 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   getColor(cat: string) { return getCategoryColor(cat); }
 
   ngOnDestroy() {
-    if (this.toastTimeout) clearTimeout(this.toastTimeout);
     if (this.animationTimeout) clearTimeout(this.animationTimeout);
-    this.toastTimeout = null;
     this.animationTimeout = null;
   }
 }

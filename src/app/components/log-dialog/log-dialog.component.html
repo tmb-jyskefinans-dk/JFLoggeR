@@ -10,12 +10,19 @@
         class="text-xl leading-none px-2 py-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition">×</button>
     </header>
 
+    @if(dayLocked()) {
+      <section class="mx-6 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200" role="status" aria-live="polite">
+        {{dayLockMessage()}}
+      </section>
+    }
+
     @if(!manualMode()) {
     <section class="px-6">
       <div class="flex items-center gap-3 mb-2">
         <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Ikke registrerede intervaller</h3>
         <button type="button" (click)="toggleAllSlots()" [attr.aria-pressed]="allSelected()"
-          class="ml-auto inline-flex items-center rounded-md border text-[11px] font-medium px-2 py-1 transition shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+          [disabled]="dayLocked()"
+          class="ml-auto inline-flex items-center rounded-md border text-[11px] font-medium px-2 py-1 transition shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed"
           [class]="allSelected() ? 'border-indigo-600 bg-indigo-600 text-white dark:bg-indigo-500 dark:border-indigo-500' : 'border-slate-300 bg-white text-slate-600 hover:border-indigo-400 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500'">
           {{ allSelected() ? 'Fravælg alle' : 'Vælg alle' }}
         </button>
@@ -27,6 +34,7 @@
                   [attr.aria-selected]="selectedSlots().includes(slot.key)"
                   [attr.aria-label]="'Interval '+slot.day+' '+slot.time"
                   aria-pressed="{{selectedSlots().includes(slot.key)}}"
+                  [disabled]="dayLocked()"
                   class="group relative inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 tabular-nums"
                   [class]="selectedSlots().includes(slot.key)
                     ? 'group relative inline-flex items-start rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition border-indigo-600 bg-indigo-600 text-white dark:bg-indigo-500 dark:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400'
@@ -54,17 +62,19 @@
       <div class="grid grid-cols-3 gap-3">
         <div class="flex flex-col gap-1">
           <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Dato</label>
-          <input type="date" [ngModel]="manualDate()" (ngModelChange)="manualDate.set($event)" name="manualDate" required
+          <input #manualDateInput type="date" [ngModel]="manualDate()" (ngModelChange)="manualDate.set($event)" name="manualDate" required
             class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Start</label>
           <input type="time" [ngModel]="manualStart()" (ngModelChange)="manualStart.set($event)" name="manualStart" required
+            [disabled]="dayLocked()"
             class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Slut</label>
           <input type="time" [ngModel]="manualEnd()" (ngModelChange)="manualEnd.set($event)" name="manualEnd" required
+            [disabled]="dayLocked()"
             class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
         </div>
       </div>
@@ -92,6 +102,7 @@
         <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Beskrivelse</label>
         @if(category() !== 'Andet') {
           <input #descInput [ngModel]="description()" (ngModelChange)="onDescriptionInput($event)" (focus)="onDescriptionFocus()" (keydown)="onDescriptionKeyDown($event)" (blur)="onDescriptionBlur()" name="description" required placeholder="fx. Månedlig rapportering"
+            [disabled]="dayLocked()"
             class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition" />
 
           @if(jiraAutocompleteEnabled()) {
@@ -132,12 +143,14 @@
         }
         @if(category() === 'Andet') {
           <input [ngModel]="andetDescription()" (ngModelChange)="andetDescription.set($event)" name="andetDescription" required placeholder="Beskriv hvad der ikke kan kategoriseres"
+            [disabled]="dayLocked()"
             class="andet-input w-full rounded-md border border-yellow-400 dark:border-yellow-600 bg-white dark:bg-yellow-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 transition" />
         }
       </div>
         <div class="flex flex-col gap-1">
       <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Kategori</label>
         <select [ngModel]="category()" (ngModelChange)="category.set($event); onCategoryChange($event)" name="category" required
+          [disabled]="dayLocked()"
           class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition">
           <option value="" disabled>Vælg kategori…</option>
            @for(g of categoryGroups; track g.label) {
@@ -167,7 +180,7 @@
       <div class="flex gap-3 justify-end w-full">
         <button type="button" (click)="closed.emit()"
           class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition">Annuller</button>
-        <button #submitBtn type="submit" [disabled]="(manualMode() ? (!manualDate() || !manualStart() || !manualEnd()) : selectedSlots().length===0) || !category().trim() || (category()!=='Andet' ? !description().trim() : !andetDescription().trim())"
+        <button #submitBtn type="submit" [disabled]="dayLocked() || (manualMode() ? (!manualDate() || !manualStart() || !manualEnd()) : selectedSlots().length===0) || !category().trim() || (category()!=='Andet' ? !description().trim() : !andetDescription().trim())"
           class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition">Gem registrering</button>
       </div>
     </footer>

@@ -5,6 +5,7 @@ import { IpcService } from './services/ipc.service';
 import { ClockService } from './services/clock.service';
 import { LogDialogComponent } from './components/log-dialog/log-dialog.component';
 import { ThemeService } from './services/theme.service';
+import { SnackbarService } from './services/snackbar.service';
 
 @Component({
   selector: 'app-root',
@@ -27,6 +28,7 @@ export class AppComponent implements OnDestroy {
   // Track which prompt slot has already triggered an auto-open to avoid reopening immediately after close
   handledPromptSlot = signal<string|null>(null);
   theme = inject(ThemeService);
+  snackbar = inject(SnackbarService);
   private removeDialogOpenLogListener?: () => void;
   private removeDialogOpenLogAllListener?: () => void;
 

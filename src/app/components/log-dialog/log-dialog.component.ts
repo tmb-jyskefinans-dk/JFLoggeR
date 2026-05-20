@@ -43,6 +43,22 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   recent = this.ipc.recent;
 
   selectedSlots = signal<string[]>([]);
+  selectedDays = computed(() => {
+    if (this.manualMode()) {
+      const day = this.manualDate();
+      return day ? [day] : [];
+    }
+    return Array.from(new Set(this.selectedSlots().map(slot => slot.split('T')[0]).filter(Boolean)));
+  });
+  lockedDay = computed(() => this.selectedDays().find(day => !!this.ipc.dayExported().get(day)) ?? '');
+  dayLocked = computed(() => !!this.lockedDay());
+  dayLockMessage = computed(() => {
+    const day = this.lockedDay();
+    if (!day) return '';
+    return this.manualMode()
+      ? `Denne dag (${day}) er allerede afstemt. Skift dato for at fortsætte med en ulåst dag.`
+      : `Denne dag (${day}) er allerede afstemt. Nye registreringer og ændringer er låst.`;
+  });
   jiraSuggestions = signal<JiraIssueSuggestion[]>([]);
   jiraLoading = signal(false);
   jiraWarning = signal('');
@@ -72,6 +88,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   @ViewChild('descInput') descInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('manualDateInput') manualDateInput?: ElementRef<HTMLInputElement>;
   @ViewChild('submitBtn') submitBtn?: ElementRef<HTMLButtonElement>;
   @ViewChildren('jiraOption') jiraOptions?: QueryList<ElementRef<HTMLButtonElement>>;
 
@@ -110,6 +127,11 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngAfterViewInit() {
     queueMicrotask(() => {
+      if (this.manualMode() && this.dayLocked()) {
+        this.manualDateInput?.nativeElement.focus();
+        return;
+      }
+      if (this.dayLocked()) return;
       if (this.openedFromNotification()) this.focusSubmitWhenReady();
       else this.descInput?.nativeElement.focus();
     });
@@ -141,11 +163,13 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   toggle(s: string) {
+    if (this.dayLocked()) return;
     const set = new Set(this.selectedSlots());
     set.has(s) ? set.delete(s) : set.add(s);
     this.selectedSlots.set(Array.from(set).sort());
   }
   toggleAllSlots() {
+    if (this.dayLocked()) return;
     if (this.allSelected()) {
       this.selectedSlots.set([]);
     } else {
@@ -154,6 +178,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
   remove(i: number) {
+    if (this.dayLocked()) return;
     const next = [...this.selectedSlots()];
     next.splice(i, 1);
     this.selectedSlots.set(next);
@@ -177,6 +202,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     this.refreshJiraAutocomplete(true);
   }
   async submit() {
+    if (!this.manualMode() && this.dayLocked()) return;
     if (this.manualMode()) {
       await this.submitManual();
       return;
