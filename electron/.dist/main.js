@@ -104,6 +104,7 @@ const stale_1 = require("./stale");
 const db_2 = require("./db");
 const auth_1 = require("./auth");
 const time_1 = require("./time");
+const jira_search_1 = require("./jira-search");
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
 try {
@@ -189,6 +190,43 @@ let staleCheckHandle = null;
 let lastStaleNotifiedKey = null;
 let digestQueue = []; // slots accumulated while user away
 let lastEntryEndTime = null; // for stale detection heuristics
+let jiraMyselfCache = null;
+async function resolveJiraIdentity(psaKey) {
+    if (!psaKey)
+        return undefined;
+    if (jiraMyselfCache && jiraMyselfCache.psaKey === psaKey) {
+        return {
+            accountId: jiraMyselfCache.accountId,
+            displayName: jiraMyselfCache.displayName,
+            emailAddress: jiraMyselfCache.emailAddress
+        };
+    }
+    try {
+        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/myself`;
+        const res = await fetchCorporateJiraJson(url, {
+            Accept: 'application/json',
+            Authorization: `Bearer ${psaKey}`
+        });
+        if (!res.ok) {
+            jiraMyselfCache = { psaKey };
+            return undefined;
+        }
+        const data = await res.json();
+        const accountId = String(data.accountId ?? data.key ?? data.name ?? '').trim() || undefined;
+        const displayName = String(data.displayName ?? '').trim() || undefined;
+        const emailAddress = String(data.emailAddress ?? '').trim() || undefined;
+        jiraMyselfCache = { psaKey, accountId, displayName, emailAddress };
+        return { accountId, displayName, emailAddress };
+    }
+    catch {
+        jiraMyselfCache = { psaKey };
+        return undefined;
+    }
+}
+async function resolveJiraAccountId(psaKey) {
+    const identity = await resolveJiraIdentity(psaKey);
+    return identity?.accountId;
+}
 // Centralized helper to add a slot key to the pending set and notify renderer.
 // Optionally suppress immediate event for bulk operations (caller emits once afterwards).
 function enqueuePending(key, opts = {}) {
@@ -638,8 +676,7 @@ electron_1.ipcMain.handle('jira:search-issues', async (_e, payload) => {
             clauses.unshift(`key = "${keyCandidate}"`);
         }
         const query = encodeURIComponent(`project = ${projectKey} AND (${clauses.join(' OR ')}) ORDER BY created DESC`);
-        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/search?jql=${query}&fields=key,summary,issuetype&maxResults=10`;
-        console.log(url);
+        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/search?jql=${query}&fields=key,summary,issuetype,assignee,reporter,customfield_10060&maxResults=10`;
         const res = await fetchCorporateJiraJson(url, {
             Accept: 'application/json',
             Authorization: `Bearer ${psaKey}`
@@ -648,19 +685,37 @@ electron_1.ipcMain.handle('jira:search-issues', async (_e, payload) => {
             return { ok: false, error: `Jira opslag fejlede (${res.status}).` };
         }
         const data = await res.json();
-        const items = (data.issues ?? [])
-            .map((issue) => ({
-            key: String(issue.key ?? '').trim(),
-            summary: String(issue.fields?.summary ?? '').trim(),
-            iconUrl: String(issue.fields?.issuetype?.iconUrl ?? '').trim()
-        }))
-            .filter((item) => !!item.key && !!item.summary);
+        const currentAccountId = await resolveJiraAccountId(psaKey);
+        const items = (0, jira_search_1.mapAndRankJiraIssues)(data.issues ?? [], term, currentAccountId);
         return { ok: true, items };
     }
     catch (e) {
         console.log('Jira search failed', e);
         logIpcFailure('jira:search-issues', e);
         return { ok: false, error: 'Jira opslag fejlede.' };
+    }
+});
+electron_1.ipcMain.handle('jira:verify-identity', async (_e, payload) => {
+    try {
+        const settings = (0, db_1.getSettings)();
+        const psaKey = String(payload?.psaKey ?? settings.jira_psa_key ?? '').trim();
+        if (!psaKey) {
+            return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+        }
+        const identity = await resolveJiraIdentity(psaKey);
+        if (!identity?.accountId) {
+            return { ok: false, error: 'PSA key kunne ikke verificeres mod Jira /myself.' };
+        }
+        return {
+            ok: true,
+            accountId: identity.accountId,
+            displayName: identity.displayName,
+            emailAddress: identity.emailAddress
+        };
+    }
+    catch (e) {
+        logIpcFailure('jira:verify-identity', e);
+        return { ok: false, error: 'Jira verifikation fejlede.' };
     }
 });
 // Categories in 'Udvikling Projekter' group that support Jira worklog posting

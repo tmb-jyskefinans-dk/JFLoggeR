@@ -58,6 +58,9 @@ export class SettingsComponent {
   authBusy = signal<boolean>(false);
   authError = signal<string>('');
   authStatus = this.ipc.authStatus;
+  jiraVerifyBusy = signal<boolean>(false);
+  jiraVerifyResult = signal<{ ok: boolean; displayName?: string; emailAddress?: string; accountId?: string; error?: string } | null>(null);
+  private autoJiraVerifyAttempted = false;
   saveToast = signal<{ message: string; kind: 'success' | 'error' } | null>(null);
   private saveToastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -72,6 +75,11 @@ export class SettingsComponent {
   weekdayState = computed(() => {
     const v = this.settingsValue();
     return this.weekdayControlNames.map(name => !!v[name]);
+  });
+
+  jiraSettingsConfigured = computed(() => {
+    const v = this.settingsValue();
+    return !!String(v.jira_psa_key ?? '').trim() && !!String(v.jira_project_key ?? '').trim();
   });
 
   // Derived signals
@@ -117,6 +125,16 @@ export class SettingsComponent {
     effect(() => {
       const v = this.ipc.settings();
       if (v) { this.apply(v); if (!this.initialSettings()) this.initialSettings.set(v); }
+
+      // Show linked Jira account automatically when Jira settings already exist.
+      if (v && !this.autoJiraVerifyAttempted) {
+        const hasPsa = !!String(v.jira_psa_key ?? '').trim();
+        const hasProject = !!String(v.jira_project_key ?? '').trim();
+        if (hasPsa && hasProject) {
+          this.autoJiraVerifyAttempted = true;
+          void this.verifyJiraIdentity();
+        }
+      }
     });
   }
 
@@ -170,6 +188,11 @@ export class SettingsComponent {
       await this.ipc.saveSettings(payload);
       // Update baseline after successful save for accurate change detection.
       this.initialSettings.set(payload);
+      if (payload.jira_psa_key && payload.jira_project_key) {
+        await this.verifyJiraIdentity(payload.jira_psa_key);
+      } else {
+        this.jiraVerifyResult.set(null);
+      }
       this.showSaveToast('Indstillinger gemt.', 'success');
     } catch {
       // Keep baseline unchanged on failure so user can retry save.
@@ -241,4 +264,25 @@ export class SettingsComponent {
   }
 
   clearImport() { this.importText.set(''); this.importResult.set(null); }
+
+  async verifyJiraIdentity(psaKeyOverride?: string) {
+    const raw = this.settingsForm.getRawValue();
+    const psaKey = String(psaKeyOverride ?? raw.jira_psa_key ?? '').trim();
+    const projectKey = String(raw.jira_project_key ?? '').trim();
+    this.jiraVerifyResult.set(null);
+    if (!psaKey || !projectKey) {
+      this.jiraVerifyResult.set({ ok: false, error: 'Udfyld både Jira PSA key og Jira project key.' });
+      return;
+    }
+
+    this.jiraVerifyBusy.set(true);
+    try {
+      const resp = await this.ipc.verifyJiraIdentity(psaKey);
+      this.jiraVerifyResult.set(resp);
+    } catch (err) {
+      this.jiraVerifyResult.set({ ok: false, error: String(err) });
+    } finally {
+      this.jiraVerifyBusy.set(false);
+    }
+  }
 }

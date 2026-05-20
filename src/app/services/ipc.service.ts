@@ -17,6 +17,15 @@ export interface JiraIssueSuggestion {
   key: string;
   summary: string;
   iconUrl: string;
+  assigneeAccountId?: string;
+  assigneeDisplayName?: string;
+  reporterAccountId?: string;
+  reporterDisplayName?: string;
+  coAssigneeAccountIds?: string[];
+  coAssigneeDisplayNames?: string[];
+  isCurrentUserAssignee?: boolean;
+  isCurrentUserCoAssignee?: boolean;
+  isCurrentUserReporter?: boolean;
 }
 
 export interface JiraWorklogEntry {
@@ -29,6 +38,14 @@ export interface JiraWorklogEntry {
 export interface JiraWorklogResult {
   ok: boolean;
   results?: JiraWorklogEntry[];
+  error?: string;
+}
+
+export interface JiraIdentityResult {
+  ok: boolean;
+  accountId?: string;
+  displayName?: string;
+  emailAddress?: string;
   error?: string;
 }
 
@@ -63,6 +80,7 @@ declare global {
       signOutMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
       jiraSearchIssues?(term: string): Promise<{ ok: boolean; items?: JiraIssueSuggestion[]; error?: string }>;
       jiraLogWorklog?(day: string): Promise<JiraWorklogResult>;
+      jiraVerifyIdentity?(payload?: { psaKey?: string }): Promise<JiraIdentityResult>;
     };
   }
 }
@@ -350,6 +368,24 @@ export class IpcService {
       .catch((err) => {
         console.error('[ipc] logWorkToJira failed', err);
         return { ok: false, error: 'Jira worklog fejlede.' } as JiraWorklogResult;
+      });
+  }
+
+  verifyJiraIdentity(psaKey?: string): Promise<JiraIdentityResult> {
+    if (!window.workApi.jiraVerifyIdentity) {
+      return Promise.resolve({ ok: false, error: 'Jira verifikation er ikke tilgængelig.' });
+    }
+    return window.workApi.jiraVerifyIdentity({ psaKey })
+      .then((resp) => ({
+        ok: !!resp?.ok,
+        accountId: resp?.accountId,
+        displayName: resp?.displayName,
+        emailAddress: resp?.emailAddress,
+        error: resp?.error
+      }))
+      .catch((err) => {
+        console.error('[ipc] verifyJiraIdentity failed', err);
+        return { ok: false, error: 'Jira verifikation fejlede.' };
       });
   }
 }

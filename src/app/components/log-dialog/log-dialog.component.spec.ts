@@ -137,4 +137,33 @@ describe('LogDialogComponent', () => {
 
     expect((ipcMock as any).searchJiraIssues).toHaveBeenCalledWith('TEAMJYFWEB-13081 - Supporter nye statusopdateringer fra Fibos');
   }));
+
+  it('returns correct role class with assignee precedence', () => {
+    expect(component.jiraSuggestionRoleClass({
+      key: 'TEAM-1',
+      summary: 'A',
+      iconUrl: '',
+      isCurrentUserAssignee: true,
+      isCurrentUserCoAssignee: true,
+      isCurrentUserReporter: true
+    })).toBe('jira-suggestion-role-assignee');
+
+    expect(component.jiraSuggestionRoleClass({
+      key: 'TEAM-2',
+      summary: 'B',
+      iconUrl: '',
+      isCurrentUserAssignee: false,
+      isCurrentUserCoAssignee: true,
+      isCurrentUserReporter: true
+    })).toBe('jira-suggestion-role-co-assignee');
+
+    expect(component.jiraSuggestionRoleClass({
+      key: 'TEAM-3',
+      summary: 'C',
+      iconUrl: '',
+      isCurrentUserAssignee: false,
+      isCurrentUserCoAssignee: false,
+      isCurrentUserReporter: true
+    })).toBe('jira-suggestion-role-reporter');
+  });
 });

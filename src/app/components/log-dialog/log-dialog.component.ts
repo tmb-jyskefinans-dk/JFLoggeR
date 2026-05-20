@@ -301,6 +301,13 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     this.clearJiraSuggestions();
   }
 
+  jiraSuggestionRoleClass(item: JiraIssueSuggestion): string {
+    if (item.isCurrentUserAssignee) return 'jira-suggestion-role-assignee';
+    if (item.isCurrentUserCoAssignee) return 'jira-suggestion-role-co-assignee';
+    if (item.isCurrentUserReporter) return 'jira-suggestion-role-reporter';
+    return '';
+  }
+
   private clearJiraSuggestions() {
     this.jiraSuggestions.set([]);
     this.jiraActiveIndex.set(-1);
