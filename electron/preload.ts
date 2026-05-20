@@ -19,19 +19,55 @@ contextBridge.exposeInMainWorld('workApi', {
 
   // Backlog queue
   getPendingSlots: () => ipcRenderer.invoke('queue:get'),
-  submitSlots: (payload: { slots: string[], description: string, category: string }) =>
+  submitSlots: (payload: { slots: string[], description: string, category: string, minimizeWindowAfterSubmit?: boolean }) =>
     ipcRenderer.invoke('queue:submit', payload),
 
+  // Azure auth
+  getAuthStatus: () => ipcRenderer.invoke('auth:get-status'),
+  signInMicrosoft: () => ipcRenderer.invoke('auth:signin'),
+  signOutMicrosoft: () => ipcRenderer.invoke('auth:signout'),
+  jiraSearchIssues: (term: string) => ipcRenderer.invoke('jira:search-issues', { term }),
+  jiraLogWorklog: (day: string) => ipcRenderer.invoke('jira:log-worklog', { day }),
+  jiraVerifyIdentity: (payload?: { psaKey?: string }) => ipcRenderer.invoke('jira:verify-identity', payload ?? {}),
+
   // Events from main (notifications clicked)
-  onPrompt: (cb: (d: any) => void) => ipcRenderer.on('prompt:open', (_e, d) => cb(d)),
-  onFocus: (cb: () => void) => ipcRenderer.on('app:focus', cb),
-  onAppReady: (cb: () => void) => ipcRenderer.once('app:ready', cb),
+  onPrompt: (cb: (d: any) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: any) => cb(d);
+    ipcRenderer.on('prompt:open', handler);
+    return () => ipcRenderer.removeListener('prompt:open', handler);
+  },
+  onFocus: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('app:focus', handler);
+    return () => ipcRenderer.removeListener('app:focus', handler);
+  },
+  onAppReady: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.once('app:ready', handler);
+    return () => ipcRenderer.removeListener('app:ready', handler);
+  },
   // Queue update event (pending slots rebuilt)
-  onQueueUpdated: (cb: () => void) => ipcRenderer.on('queue:updated', cb),
+  onQueueUpdated: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('queue:updated', handler);
+    return () => ipcRenderer.removeListener('queue:updated', handler);
+  },
   // Navigation events
-  onNavigateToday: (cb: (day: string) => void) => ipcRenderer.on('navigate:today', (_e, d: { day: string }) => cb(d.day)),
-  onDialogOpenLog: (cb: (slot?: string) => void) => ipcRenderer.on('dialog:open-log', (_e, d: { slot?: string }) => cb(d?.slot)),
-  onDialogOpenLogAll: (cb: () => void) => ipcRenderer.on('dialog:open-log-all', () => cb()),
+  onNavigateToday: (cb: (day: string) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: { day: string }) => cb(d.day);
+    ipcRenderer.on('navigate:today', handler);
+    return () => ipcRenderer.removeListener('navigate:today', handler);
+  },
+  onDialogOpenLog: (cb: (d: { slot?: string; source?: string }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: { slot?: string; source?: string }) => cb(d ?? {});
+    ipcRenderer.on('dialog:open-log', handler);
+    return () => ipcRenderer.removeListener('dialog:open-log', handler);
+  },
+  onDialogOpenLogAll: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('dialog:open-log-all', handler);
+    return () => ipcRenderer.removeListener('dialog:open-log-all', handler);
+  },
   // Debug notification trigger
   sendTestNotification: (body?: string) => ipcRenderer.invoke('debug:notify', { body })
   ,
@@ -39,7 +75,11 @@ contextBridge.exposeInMainWorld('workApi', {
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
-  onMaximizeState: (cb: (state: { maximized: boolean }) => void) => ipcRenderer.on('window:maximize-state', (_e, d) => cb(d))
+  onMaximizeState: (cb: (state: { maximized: boolean }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: { maximized: boolean }) => cb(d);
+    ipcRenderer.on('window:maximize-state', handler);
+    return () => ipcRenderer.removeListener('window:maximize-state', handler);
+  }
   ,
   // Logging bridge
   logWrite: (level: string, message: string, meta?: any) => ipcRenderer.invoke('log:write', { level, message, meta })

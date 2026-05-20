@@ -20,23 +20,62 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     // Backlog queue
     getPendingSlots: () => electron_1.ipcRenderer.invoke('queue:get'),
     submitSlots: (payload) => electron_1.ipcRenderer.invoke('queue:submit', payload),
+    // Azure auth
+    getAuthStatus: () => electron_1.ipcRenderer.invoke('auth:get-status'),
+    signInMicrosoft: () => electron_1.ipcRenderer.invoke('auth:signin'),
+    signOutMicrosoft: () => electron_1.ipcRenderer.invoke('auth:signout'),
+    jiraSearchIssues: (term) => electron_1.ipcRenderer.invoke('jira:search-issues', { term }),
+    jiraLogWorklog: (day) => electron_1.ipcRenderer.invoke('jira:log-worklog', { day }),
+    jiraVerifyIdentity: (payload) => electron_1.ipcRenderer.invoke('jira:verify-identity', payload ?? {}),
     // Events from main (notifications clicked)
-    onPrompt: (cb) => electron_1.ipcRenderer.on('prompt:open', (_e, d) => cb(d)),
-    onFocus: (cb) => electron_1.ipcRenderer.on('app:focus', cb),
-    onAppReady: (cb) => electron_1.ipcRenderer.once('app:ready', cb),
+    onPrompt: (cb) => {
+        const handler = (_e, d) => cb(d);
+        electron_1.ipcRenderer.on('prompt:open', handler);
+        return () => electron_1.ipcRenderer.removeListener('prompt:open', handler);
+    },
+    onFocus: (cb) => {
+        const handler = () => cb();
+        electron_1.ipcRenderer.on('app:focus', handler);
+        return () => electron_1.ipcRenderer.removeListener('app:focus', handler);
+    },
+    onAppReady: (cb) => {
+        const handler = () => cb();
+        electron_1.ipcRenderer.once('app:ready', handler);
+        return () => electron_1.ipcRenderer.removeListener('app:ready', handler);
+    },
     // Queue update event (pending slots rebuilt)
-    onQueueUpdated: (cb) => electron_1.ipcRenderer.on('queue:updated', cb),
+    onQueueUpdated: (cb) => {
+        const handler = () => cb();
+        electron_1.ipcRenderer.on('queue:updated', handler);
+        return () => electron_1.ipcRenderer.removeListener('queue:updated', handler);
+    },
     // Navigation events
-    onNavigateToday: (cb) => electron_1.ipcRenderer.on('navigate:today', (_e, d) => cb(d.day)),
-    onDialogOpenLog: (cb) => electron_1.ipcRenderer.on('dialog:open-log', (_e, d) => cb(d?.slot)),
-    onDialogOpenLogAll: (cb) => electron_1.ipcRenderer.on('dialog:open-log-all', () => cb()),
+    onNavigateToday: (cb) => {
+        const handler = (_e, d) => cb(d.day);
+        electron_1.ipcRenderer.on('navigate:today', handler);
+        return () => electron_1.ipcRenderer.removeListener('navigate:today', handler);
+    },
+    onDialogOpenLog: (cb) => {
+        const handler = (_e, d) => cb(d ?? {});
+        electron_1.ipcRenderer.on('dialog:open-log', handler);
+        return () => electron_1.ipcRenderer.removeListener('dialog:open-log', handler);
+    },
+    onDialogOpenLogAll: (cb) => {
+        const handler = () => cb();
+        electron_1.ipcRenderer.on('dialog:open-log-all', handler);
+        return () => electron_1.ipcRenderer.removeListener('dialog:open-log-all', handler);
+    },
     // Debug notification trigger
     sendTestNotification: (body) => electron_1.ipcRenderer.invoke('debug:notify', { body }),
     // Window controls
     minimizeWindow: () => electron_1.ipcRenderer.invoke('window:minimize'),
     toggleMaximizeWindow: () => electron_1.ipcRenderer.invoke('window:toggle-maximize'),
     closeWindow: () => electron_1.ipcRenderer.invoke('window:close'),
-    onMaximizeState: (cb) => electron_1.ipcRenderer.on('window:maximize-state', (_e, d) => cb(d)),
+    onMaximizeState: (cb) => {
+        const handler = (_e, d) => cb(d);
+        electron_1.ipcRenderer.on('window:maximize-state', handler);
+        return () => electron_1.ipcRenderer.removeListener('window:maximize-state', handler);
+    },
     // Logging bridge
     logWrite: (level, message, meta) => electron_1.ipcRenderer.invoke('log:write', { level, message, meta })
 });

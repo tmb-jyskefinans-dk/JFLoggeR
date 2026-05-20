@@ -20,6 +20,7 @@ export class ExportService {
     }
 
     const rows = this.ipc.summary();
+    if (!rows.length) return { ok: false, error: 'no-data' };
     const categoryTotals = (this.ipc as any).categoryTotals?.() ?? []; // if exposed publicly later
     // Recompute category totals locally if not accessible
     const catMap = new Map<string, { category: string; slots: number; minutes: number }>();
@@ -73,20 +74,28 @@ export class ExportService {
     XLSX.utils.book_append_sheet(wb, wsCats, 'CategoryTotals');
     XLSX.utils.book_append_sheet(wb, wsGroups, 'RootGroupTotals');
 
-    const arrayBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([arrayBuf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const filename = `worklog-summary-${day}.xlsx`;
-    // Trigger download in browser context
+    let objectUrl = '';
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(a.href);
-      a.remove();
-    }, 2000);
-    return { ok: true, filename };
+    const filename = `worklog-summary-${day}.xlsx`;
+    try {
+      const arrayBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([arrayBuf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      // Trigger download in browser context
+      objectUrl = URL.createObjectURL(blob);
+      a.href = objectUrl;
+      a.download = filename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      return { ok: true, filename };
+    } catch (err) {
+      console.error('[export] Failed to build or download workbook', err);
+      return { ok: false, error: 'xlsx-export-failed' };
+    } finally {
+      setTimeout(() => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        a.remove();
+      }, 2000);
+    }
   }
 }

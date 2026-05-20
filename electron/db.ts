@@ -20,11 +20,18 @@ export type Settings = {
   work_end: string;      // "16:00"
   slot_minutes: number;  // 15
   weekdays_mask: number; // bitmask Sun..Sat (Sun=1<<0)
+  include_active_slot?: boolean; // deprecated: pending queue is end-time-only
+  azure_tenant_id?: string;      // Microsoft Entra tenant ID (not a secret)
+  azure_client_id?: string;      // Microsoft Entra app registration client ID (not a secret)
   auto_focus_on_slot?: boolean; // bring app to front & open dialog on new slot
   notification_silent?: boolean; // notifications play no sound when true
   stale_threshold_minutes?: number; // minutes beyond slot length before stale prompt
   auto_start_on_login?: boolean; // launch app on OS login
   group_notifications?: boolean; // consolidate missed notifications when away
+  minimize_after_notification_submit?: boolean; // minimize app after logging from notification-opened dialog
+  jira_psa_key?: string; // Jira PSA key for API access
+  jira_project_key?: string; // Jira project key for autocomplete queries
+  jira_log_on_afstem?: boolean; // automatically post Jira worklogs when marking a day as afstemt
 };
 
 type Data = {
@@ -39,14 +46,27 @@ const DEFAULT_SETTINGS: Settings = {
   work_end: '16:00',
   slot_minutes: 15,
   weekdays_mask: 0b0111110, // Mon–Fri
+  include_active_slot: false,
+  azure_tenant_id: '',
+  azure_client_id: '',
   auto_focus_on_slot: false,
   notification_silent: true,
   stale_threshold_minutes: 45,
   auto_start_on_login: false,
-  group_notifications: true
+  group_notifications: true,
+  minimize_after_notification_submit: false,
+  jira_psa_key: '',
+  jira_project_key: '',
+  jira_log_on_afstem: false
 };
 
 let db: LowSync<Data>;
+
+function sanitizeSlotMinutes(value: unknown): number {
+  const parsed = Math.trunc(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SETTINGS.slot_minutes;
+  return parsed;
+}
 
 function ensureDb() {
   // Lazy init safeguard in case callers access before main.ts calls initDb()
@@ -77,7 +97,23 @@ export function initDb() {
   }
   if (!db.data.settings) { db.data.settings = { ...DEFAULT_SETTINGS }; changed = true; }
   else {
+    if (sanitizeSlotMinutes(db.data.settings.slot_minutes) !== db.data.settings.slot_minutes) {
+      db.data.settings.slot_minutes = sanitizeSlotMinutes(db.data.settings.slot_minutes);
+      changed = true;
+    }
     // ensure new fields
+    if (db.data.settings.include_active_slot !== false) {
+      db.data.settings.include_active_slot = false;
+      changed = true;
+    }
+    if (typeof db.data.settings.azure_tenant_id !== 'string') {
+      db.data.settings.azure_tenant_id = DEFAULT_SETTINGS.azure_tenant_id!;
+      changed = true;
+    }
+    if (typeof db.data.settings.azure_client_id !== 'string') {
+      db.data.settings.azure_client_id = DEFAULT_SETTINGS.azure_client_id!;
+      changed = true;
+    }
     if (typeof db.data.settings.auto_focus_on_slot !== 'boolean') {
       db.data.settings.auto_focus_on_slot = DEFAULT_SETTINGS.auto_focus_on_slot!;
       changed = true;
@@ -86,6 +122,10 @@ export function initDb() {
     if (typeof db.data.settings.stale_threshold_minutes !== 'number') { db.data.settings.stale_threshold_minutes = DEFAULT_SETTINGS.stale_threshold_minutes!; changed = true; }
     if (typeof db.data.settings.auto_start_on_login !== 'boolean') { db.data.settings.auto_start_on_login = DEFAULT_SETTINGS.auto_start_on_login!; changed = true; }
     if (typeof db.data.settings.group_notifications !== 'boolean') { db.data.settings.group_notifications = DEFAULT_SETTINGS.group_notifications!; changed = true; }
+    if (typeof db.data.settings.minimize_after_notification_submit !== 'boolean') { db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit!; changed = true; }
+    if (typeof db.data.settings.jira_psa_key !== 'string') { db.data.settings.jira_psa_key = DEFAULT_SETTINGS.jira_psa_key!; changed = true; }
+    if (typeof db.data.settings.jira_project_key !== 'string') { db.data.settings.jira_project_key = DEFAULT_SETTINGS.jira_project_key!; changed = true; }
+    if (typeof db.data.settings.jira_log_on_afstem !== 'boolean') { db.data.settings.jira_log_on_afstem = DEFAULT_SETTINGS.jira_log_on_afstem!; changed = true; }
   }
   if (typeof db.data._seq !== 'number') { db.data._seq = 1; changed = true; }
   if (!Array.isArray(db.data.entries)) { db.data.entries = []; changed = true; }
@@ -105,13 +145,20 @@ export function saveSettings(s: Settings) {
   db.data!.settings = {
     work_start: s.work_start,
     work_end: s.work_end,
-    slot_minutes: Number(s.slot_minutes) || 15,
+    slot_minutes: sanitizeSlotMinutes(s.slot_minutes),
     weekdays_mask: Number(s.weekdays_mask) >>> 0,
+    include_active_slot: false,
+    azure_tenant_id: String(s.azure_tenant_id ?? '').trim(),
+    azure_client_id: String(s.azure_client_id ?? '').trim(),
     auto_focus_on_slot: !!s.auto_focus_on_slot,
     notification_silent: !!s.notification_silent,
     stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes!,
     auto_start_on_login: !!s.auto_start_on_login,
-    group_notifications: !!s.group_notifications
+    group_notifications: !!s.group_notifications,
+    minimize_after_notification_submit: !!s.minimize_after_notification_submit,
+    jira_psa_key: String(s.jira_psa_key ?? '').trim(),
+    jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase(),
+    jira_log_on_afstem: !!s.jira_log_on_afstem
   };
   db.write();
 }
@@ -275,13 +322,14 @@ export function lastNEntries(n = 8) {
  */
 export function importExternalLines(raw: string) {
   ensureDb(); db.read();
-  const slotMinutes = getSettings().slot_minutes; // dynamic granularity
+  const slotMinutes = sanitizeSlotMinutes(getSettings().slot_minutes); // dynamic granularity
   const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
   const imported: Entry[] = [];
   const details: { line: number; reason: string }[] = [];
   let skipped = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    let importedForLine = 0;
     let obj: any;
     try { obj = JSON.parse(line); } catch (e) { skipped++; details.push({ line: i+1, reason: 'Invalid JSON' }); continue; }
     const { task, segment_start, segment_end, category } = obj || {};
@@ -310,11 +358,15 @@ export function importExternalLines(raw: string) {
       const catRaw = typeof category === 'string' ? category.trim() : '';
       const cat = catRaw || 'Import';
       imported.push({ day, start: startHM, end: endHM, description: String(task), category: cat, created_at: new Date().toISOString() });
+      importedForLine++;
       cursor = slotEnd;
     }
-    if (imported.length === 0 && intervalMinutes < slotMinutes) {
-      // Too small interval < slot granularity
-      details.push({ line: i+1, reason: 'Interval shorter than slot granularity – ignored' });
+    if (importedForLine === 0) {
+      // Line parsed but did not contain a full slot interval.
+      const reason = intervalMinutes < slotMinutes
+        ? 'Interval shorter than slot granularity – ignored'
+        : 'No full slot intervals found within segment – ignored';
+      details.push({ line: i+1, reason });
       skipped++;
     }
   }

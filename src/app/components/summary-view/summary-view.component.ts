@@ -1,7 +1,7 @@
-import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, AfterViewInit } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, AfterViewInit, OnDestroy } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { IpcService, SummaryRow } from '../../services/ipc.service';
+import { IpcService, JiraWorklogResult, SummaryRow } from '../../services/ipc.service';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { getCategoryColor } from '../../models/category-colors';
@@ -17,7 +17,7 @@ import { ExportService } from '../../services/export.service';
     '(window:keydown)': 'onKeydown($event)'
   }
 })
-export class SummaryViewComponent implements AfterViewInit  {
+export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   private route = inject(ActivatedRoute);
   ipc = inject(IpcService);
   exporter = inject(ExportService);
@@ -27,11 +27,37 @@ export class SummaryViewComponent implements AfterViewInit  {
   day = computed(() => this.paramMap()?.get('ymd') ?? '');
 
   loading = signal(false);
+  // Jira worklog confirmation state
+  jiraConfirming = signal(false);
+  jiraLogging = signal(false);
+  jiraResult = signal<JiraWorklogResult | null>(null);
+  jiraUnsetConfirming = signal(false);
 
   rows = computed<SummaryRow[]>(() => this.ipc.summary());
   totalSlots = computed(() => this.rows().reduce((a, r) => a + r.slots, 0));
   totalMinutes = computed(() => this.rows().reduce((a, r) => a + r.minutes, 0));
   // External exported status for current day
+    private readonly jiraCategories = new Set([
+      'Udvikling (prioriterede jf. projektoversigten)',
+      'Estimering'
+    ]);
+
+    /** Rows eligible for Jira worklog: in 'Udvikling Projekter' group + description has a parseable key */
+    jiraWorklogRows = computed(() =>
+      this.rows().filter(r =>
+        this.jiraCategories.has(r.category) &&
+        /^[A-Z]+-\d+\s*-\s*/.test(r.description)
+      )
+    );
+
+    jiraKeyFromRow(r: SummaryRow): string {
+      return r.description.match(/^([A-Z]+-\d+)/)?.[1] ?? '';
+    }
+
+    jiraSummaryFromRow(r: SummaryRow): string {
+      return r.description.replace(/^[A-Z]+-\d+\s*-\s*/, '').trim();
+    }
+
   exported = computed(() => this.ipc.dayExported().get(this.day()) ?? false);
   // Grouped totals by category
   // Category totals aggregated, but ordered by CATEGORY_GROUPS definition rather than by minutes
@@ -138,7 +164,8 @@ export class SummaryViewComponent implements AfterViewInit  {
 
   private lastRequest = 0;
   private initialized = false;
-  private toastTimeout: any = null;
+  private toastTimeout: ReturnType<typeof setTimeout> | null = null;
+  private animationTimeout: ReturnType<typeof setTimeout> | null = null;
   toast = signal<string | null>(null);
 
   // Navigation helpers
@@ -149,7 +176,7 @@ export class SummaryViewComponent implements AfterViewInit  {
     const day = String(d.getDate()).padStart(2,'0');
     return `${y}-${m}-${day}`;
   }
-  private todayYmd(): string { return this.fmtLocal(new Date()); }
+  public todayYmd(): string { return this.fmtLocal(new Date()); }
   isToday = computed(() => this.day() === this.todayYmd());
   prevDay = computed(() => {
     const d = this.day();
@@ -182,7 +209,49 @@ export class SummaryViewComponent implements AfterViewInit  {
     const day = this.day();
     if (!day) return;
     const checked = (ev.target as HTMLInputElement).checked;
-    this.ipc.setDayExported(day, checked);
+    const warnOnUnset = !!this.ipc.settings()?.jira_log_on_afstem;
+    if (!checked && warnOnUnset && this.jiraWorklogRows().length > 0) {
+      this.jiraUnsetConfirming.set(true);
+      return;
+    }
+    if (checked && this.ipc.settings()?.jira_log_on_afstem && this.ipc.settings()?.jira_psa_key) {
+      this.jiraConfirming.set(true);
+    } else {
+      this.ipc.setDayExported(day, checked);
+    }
+  }
+
+  cancelJiraUnsetConfirm() {
+    this.jiraUnsetConfirming.set(false);
+  }
+
+  confirmJiraUnset() {
+    const day = this.day();
+    if (!day) return;
+    this.ipc.setDayExported(day, false);
+    this.jiraUnsetConfirming.set(false);
+  }
+
+  cancelJiraConfirm() {
+    this.jiraConfirming.set(false);
+    this.jiraResult.set(null);
+  }
+
+  async confirmJiraLog() {
+    const day = this.day();
+    if (!day) return;
+    this.jiraLogging.set(true);
+    try {
+      const result = await this.ipc.logWorkToJira(day);
+      this.jiraResult.set(result);
+      this.jiraConfirming.set(false);
+      await this.ipc.setDayExported(day, true);
+    } catch {
+      this.jiraResult.set({ ok: false, error: 'Uventet fejl under Jira logning.' });
+      this.jiraConfirming.set(false);
+    } finally {
+      this.jiraLogging.set(false);
+    }
   }
 
   // Keyboard shortcuts: ArrowLeft / ArrowRight for day nav, 't' for today
@@ -238,14 +307,18 @@ export class SummaryViewComponent implements AfterViewInit  {
     const result = await this.exporter.exportDaySummary(d);
     if (!result.ok) {
       console.error('[summary] export failed', result.error);
+      this.showToast('Eksport fejlede. Prøv igen.');
+      return;
     }
+    this.showToast(`Eksporteret: ${result.filename}`);
   }
 
   private showToast(msg: string) {
     this.toast.set(msg);
-    clearTimeout(this.toastTimeout);
+    if (this.toastTimeout) clearTimeout(this.toastTimeout);
     this.toastTimeout = setTimeout(() => {
       this.toast.set(null);
+      this.toastTimeout = null;
     }, 3000);
   }
 
@@ -258,8 +331,12 @@ export class SummaryViewComponent implements AfterViewInit  {
     this.animResetToken++;
     this.animateBars.set(false);
     this.animateDonut.set(false);
+    if (this.animationTimeout) clearTimeout(this.animationTimeout);
     // Schedule start after microtask to allow DOM bindings update
-    setTimeout(() => this.startAnimations(), 50);
+    this.animationTimeout = setTimeout(() => {
+      this.startAnimations();
+      this.animationTimeout = null;
+    }, 50);
   }
 
   private startAnimations() {
@@ -271,4 +348,11 @@ export class SummaryViewComponent implements AfterViewInit  {
   }
 
   getColor(cat: string) { return getCategoryColor(cat); }
+
+  ngOnDestroy() {
+    if (this.toastTimeout) clearTimeout(this.toastTimeout);
+    if (this.animationTimeout) clearTimeout(this.animationTimeout);
+    this.toastTimeout = null;
+    this.animationTimeout = null;
+  }
 }

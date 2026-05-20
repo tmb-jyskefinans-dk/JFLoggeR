@@ -1,4 +1,5 @@
 import { buildSlotKeys, filterNovelSlots, prefillDate, shouldEmitClosed } from './manual-log.component';
+import { preserveCategoryDescriptions } from '../shared/category-description.util';
 
 describe('ManualLogComponent helpers', () => {
   test('buildSlotKeys aligns to slot length and excludes end boundary', () => {
@@ -21,5 +22,17 @@ describe('ManualLogComponent helpers', () => {
   test('shouldEmitClosed true only in dialog mode', () => {
     expect(shouldEmitClosed(true)).toBe(true);
     expect(shouldEmitClosed(false)).toBe(false);
+  });
+  test('preserveCategoryDescriptions copies base into Andet when switching to Andet', () => {
+    const next = preserveCategoryDescriptions('Andet', 'Typed text', '');
+    expect(next).toEqual({ description: 'Typed text', andetDescription: 'Typed text' });
+  });
+  test('preserveCategoryDescriptions keeps existing Andet text when switching to Andet', () => {
+    const next = preserveCategoryDescriptions('Andet', 'Typed text', 'Custom other');
+    expect(next).toEqual({ description: 'Typed text', andetDescription: 'Custom other' });
+  });
+  test('preserveCategoryDescriptions copies Andet text back when leaving Andet', () => {
+    const next = preserveCategoryDescriptions('Møde', '', 'Custom other');
+    expect(next).toEqual({ description: 'Custom other', andetDescription: 'Custom other' });
   });
 });

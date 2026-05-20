@@ -1,43 +1,92 @@
 import { Component, inject, ChangeDetectionStrategy, effect, signal, computed } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
 import { IpcService } from '../../services/ipc.service';
-import { FormsModule } from '@angular/forms';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 
 @Component({
   selector: 'settings-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe],
+  imports: [ReactiveFormsModule, DecimalPipe],
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss']
 })
 export class SettingsComponent {
   ipc = inject(IpcService);
   theme = inject(ThemeService);
+  private fb = inject(FormBuilder);
 
-  // Signals replacing primitive fields
-  workStart = signal<string>('08:00');
-  workEnd = signal<string>('16:00');
-  slotMinutes = signal<number>(15);
-  weekdayState = signal<boolean[]>([false, true, true, true, true, true, false]);
-  autoFocusOnSlot = signal<boolean>(false);
-  notificationSilent = signal<boolean>(true);
-  staleThresholdMinutes = signal<number>(45);
-  autoStartOnLogin = signal<boolean>(false);
-  groupNotifications = signal<boolean>(true);
+  private readonly weekdayControlNames = [
+    'weekday_0',
+    'weekday_1',
+    'weekday_2',
+    'weekday_3',
+    'weekday_4',
+    'weekday_5',
+    'weekday_6'
+  ] as const;
+
+  settingsForm = this.fb.nonNullable.group({
+    work_start: '08:00',
+    work_end: '16:00',
+    slot_minutes: 15,
+    weekday_0: false,
+    weekday_1: true,
+    weekday_2: true,
+    weekday_3: true,
+    weekday_4: true,
+    weekday_5: true,
+    weekday_6: false,
+    azure_tenant_id: '',
+    azure_client_id: '',
+    jira_psa_key: '',
+    jira_project_key: '',
+    auto_focus_on_slot: false,
+    notification_silent: true,
+    stale_threshold_minutes: 45,
+    auto_start_on_login: false,
+    group_notifications: true,
+    minimize_after_notification_submit: false,
+    jira_log_on_afstem: false
+  });
+
+  private settingsValue = toSignal(this.settingsForm.valueChanges, {
+    initialValue: this.settingsForm.getRawValue()
+  });
+
+  authBusy = signal<boolean>(false);
+  authError = signal<string>('');
+  authStatus = this.ipc.authStatus;
+  jiraVerifyBusy = signal<boolean>(false);
+  jiraVerifyResult = signal<{ ok: boolean; displayName?: string; emailAddress?: string; accountId?: string; error?: string } | null>(null);
+  private autoJiraVerifyAttempted = false;
+  saveToast = signal<{ message: string; kind: 'success' | 'error' } | null>(null);
+  private saveToastTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Import feature signals
   importText = signal<string>('');
   importResult = signal<{ ok: boolean; imported?: number; skipped?: number; details?: { line: number; reason: string }[]; error?: string }|null>(null);
   importing = signal<boolean>(false);
 
-  days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  days = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
   initialSettings = signal<any|null>(null);
+
+  weekdayState = computed(() => {
+    const v = this.settingsValue();
+    return this.weekdayControlNames.map(name => !!v[name]);
+  });
+
+  jiraSettingsConfigured = computed(() => {
+    const v = this.settingsValue();
+    return !!String(v.jira_psa_key ?? '').trim() && !!String(v.jira_project_key ?? '').trim();
+  });
 
   // Derived signals
   totalWorkMinutes = computed(() => {
-    const startParts = this.workStart().split(':').map(Number);
-    const endParts = this.workEnd().split(':').map(Number);
+    const v = this.settingsValue();
+    const startParts = (v.work_start || '').split(':').map(Number);
+    const endParts = (v.work_end || '').split(':').map(Number);
     if (startParts.length < 2 || endParts.length < 2) return 0;
     const startM = startParts[0]*60 + startParts[1];
     const endM = endParts[0]*60 + endParts[1];
@@ -48,57 +97,116 @@ export class SettingsComponent {
   changed = computed(() => {
     const s = this.initialSettings();
     if (!s) return false;
+      const v = this.settingsValue();
     const maskOrig = s.weekdays_mask;
-    const maskNow = this.weekdayState().reduce((acc,on,i)=> on? acc | (1<<i): acc,0);
-    return s.work_start !== this.workStart() ||
-           s.work_end !== this.workEnd() ||
-           s.slot_minutes !== this.slotMinutes() ||
+      const maskNow = this.weekdayControlNames.reduce((acc, name, i) => v[name] ? acc | (1 << i) : acc, 0);
+      return s.work_start !== v.work_start ||
+        s.work_end !== v.work_end ||
+        Number(s.slot_minutes) !== Number(v.slot_minutes) ||
            maskOrig !== maskNow ||
-           (!!s.auto_focus_on_slot !== this.autoFocusOnSlot()) ||
-           (!!s.notification_silent !== this.notificationSilent()) ||
-           (Number(s.stale_threshold_minutes) !== this.staleThresholdMinutes()) ||
-           (!!s.auto_start_on_login !== this.autoStartOnLogin()) ||
-           (!!s.group_notifications !== this.groupNotifications());
+        ((s.azure_tenant_id ?? '') !== (v.azure_tenant_id ?? '')) ||
+        ((s.azure_client_id ?? '') !== (v.azure_client_id ?? '')) ||
+        ((s.jira_psa_key ?? '') !== (v.jira_psa_key ?? '')) ||
+        ((s.jira_project_key ?? '') !== (v.jira_project_key ?? '')) ||
+        (!!s.auto_focus_on_slot !== !!v.auto_focus_on_slot) ||
+        (!!s.notification_silent !== !!v.notification_silent) ||
+        (Number(s.stale_threshold_minutes) !== Number(v.stale_threshold_minutes)) ||
+        (!!s.auto_start_on_login !== !!v.auto_start_on_login) ||
+          (!!s.group_notifications !== !!v.group_notifications) ||
+          (!!s.minimize_after_notification_submit !== !!v.minimize_after_notification_submit) ||
+          (!!s.jira_log_on_afstem !== !!v.jira_log_on_afstem);
   });
 
   constructor() {
     const s = this.ipc.settings();
   if (s) { this.apply(s); this.initialSettings.set(s); } else this.ipc.loadSettings();
+    this.ipc.loadAuthStatus();
     // Reactively apply settings when signal updates
     effect(() => {
       const v = this.ipc.settings();
       if (v) { this.apply(v); if (!this.initialSettings()) this.initialSettings.set(v); }
+
+      // Show linked Jira account automatically when Jira settings already exist.
+      if (v && !this.autoJiraVerifyAttempted) {
+        const hasPsa = !!String(v.jira_psa_key ?? '').trim();
+        const hasProject = !!String(v.jira_project_key ?? '').trim();
+        if (hasPsa && hasProject) {
+          this.autoJiraVerifyAttempted = true;
+          void this.verifyJiraIdentity();
+        }
+      }
     });
   }
 
   apply(s: any) {
-    this.workStart.set(s.work_start);
-    this.workEnd.set(s.work_end);
-    this.slotMinutes.set(s.slot_minutes);
-    this.weekdayState.set(Array.from({length:7},(_,i)=> (s.weekdays_mask & (1<<i))!==0));
-    this.autoFocusOnSlot.set(!!s.auto_focus_on_slot);
-    this.notificationSilent.set(!!s.notification_silent);
-    this.staleThresholdMinutes.set(Number(s.stale_threshold_minutes) || 45);
-    this.autoStartOnLogin.set(!!s.auto_start_on_login);
-    this.groupNotifications.set(!!s.group_notifications);
+    this.settingsForm.patchValue({
+      work_start: s.work_start,
+      work_end: s.work_end,
+      slot_minutes: Number(s.slot_minutes) || 15,
+      weekday_0: (s.weekdays_mask & (1 << 0)) !== 0,
+      weekday_1: (s.weekdays_mask & (1 << 1)) !== 0,
+      weekday_2: (s.weekdays_mask & (1 << 2)) !== 0,
+      weekday_3: (s.weekdays_mask & (1 << 3)) !== 0,
+      weekday_4: (s.weekdays_mask & (1 << 4)) !== 0,
+      weekday_5: (s.weekdays_mask & (1 << 5)) !== 0,
+      weekday_6: (s.weekdays_mask & (1 << 6)) !== 0,
+      azure_tenant_id: s.azure_tenant_id ?? '',
+      azure_client_id: s.azure_client_id ?? '',
+      jira_psa_key: s.jira_psa_key ?? '',
+      jira_project_key: s.jira_project_key ?? '',
+      auto_focus_on_slot: !!s.auto_focus_on_slot,
+      notification_silent: !!s.notification_silent,
+      stale_threshold_minutes: Number(s.stale_threshold_minutes) || 45,
+      auto_start_on_login: !!s.auto_start_on_login,
+      group_notifications: !!s.group_notifications,
+      minimize_after_notification_submit: !!s.minimize_after_notification_submit,
+      jira_log_on_afstem: !!s.jira_log_on_afstem
+    });
   }
 
-  save() {
-    const weekdays_mask = this.weekdayState().reduce((acc, on, i)=> on? acc | (1<<i): acc, 0);
+  async save() {
+    const raw = this.settingsForm.getRawValue();
+    const weekdays_mask = this.weekdayControlNames.reduce((acc, name, i) => raw[name] ? acc | (1 << i) : acc, 0);
     const payload = {
-      work_start: this.workStart(),
-      work_end: this.workEnd(),
-      slot_minutes: Number(this.slotMinutes()),
+      work_start: raw.work_start,
+      work_end: raw.work_end,
+      slot_minutes: Number(raw.slot_minutes),
       weekdays_mask,
-      auto_focus_on_slot: this.autoFocusOnSlot(),
-      notification_silent: this.notificationSilent(),
-      stale_threshold_minutes: Number(this.staleThresholdMinutes()),
-      auto_start_on_login: this.autoStartOnLogin(),
-      group_notifications: this.groupNotifications()
+      azure_tenant_id: raw.azure_tenant_id.trim(),
+      azure_client_id: raw.azure_client_id.trim(),
+      jira_psa_key: raw.jira_psa_key.trim(),
+      jira_project_key: raw.jira_project_key.trim().toUpperCase(),
+      auto_focus_on_slot: raw.auto_focus_on_slot,
+      notification_silent: raw.notification_silent,
+      stale_threshold_minutes: Number(raw.stale_threshold_minutes),
+      auto_start_on_login: raw.auto_start_on_login,
+      group_notifications: raw.group_notifications,
+      minimize_after_notification_submit: raw.minimize_after_notification_submit,
+      jira_log_on_afstem: raw.jira_log_on_afstem
     };
-    this.ipc.saveSettings(payload);
-    // Update baseline after save for change detection
-    this.initialSettings.set(payload);
+    try {
+      await this.ipc.saveSettings(payload);
+      // Update baseline after successful save for accurate change detection.
+      this.initialSettings.set(payload);
+      if (payload.jira_psa_key && payload.jira_project_key) {
+        await this.verifyJiraIdentity(payload.jira_psa_key);
+      } else {
+        this.jiraVerifyResult.set(null);
+      }
+      this.showSaveToast('Indstillinger gemt.', 'success');
+    } catch {
+      // Keep baseline unchanged on failure so user can retry save.
+      this.showSaveToast('Gemning fejlede. Prøv igen.', 'error');
+    }
+  }
+
+  private showSaveToast(message: string, kind: 'success' | 'error') {
+    this.saveToast.set({ message, kind });
+    if (this.saveToastTimer) clearTimeout(this.saveToastTimer);
+    this.saveToastTimer = setTimeout(() => {
+      this.saveToast.set(null);
+      this.saveToastTimer = null;
+    }, 2800);
   }
 
   reset() {
@@ -107,11 +215,42 @@ export class SettingsComponent {
   }
 
   toggleWeekday(i: number) {
-    this.weekdayState.update(arr => {
-      const copy = [...arr];
-      copy[i] = !copy[i];
-      return copy;
-    });
+    const key = this.weekdayControlNames[i];
+    if (!key) return;
+    const ctrl = this.settingsForm.controls[key];
+    ctrl.setValue(!ctrl.value);
+  }
+
+  async signInMicrosoft() {
+    this.authError.set('');
+    this.authBusy.set(true);
+    try {
+      const resp = await this.ipc.signInMicrosoft();
+      if (!resp?.ok) {
+        this.authError.set(resp?.error ?? 'Sign-in failed');
+      }
+      await this.ipc.loadAuthStatus();
+    } catch (err) {
+      this.authError.set(String(err));
+    } finally {
+      this.authBusy.set(false);
+    }
+  }
+
+  async signOutMicrosoft() {
+    this.authError.set('');
+    this.authBusy.set(true);
+    try {
+      const resp = await this.ipc.signOutMicrosoft();
+      if (!resp?.ok) {
+        this.authError.set(resp?.error ?? 'Sign-out failed');
+      }
+      await this.ipc.loadAuthStatus();
+    } catch (err) {
+      this.authError.set(String(err));
+    } finally {
+      this.authBusy.set(false);
+    }
   }
 
   performImport() {
@@ -125,4 +264,25 @@ export class SettingsComponent {
   }
 
   clearImport() { this.importText.set(''); this.importResult.set(null); }
+
+  async verifyJiraIdentity(psaKeyOverride?: string) {
+    const raw = this.settingsForm.getRawValue();
+    const psaKey = String(psaKeyOverride ?? raw.jira_psa_key ?? '').trim();
+    const projectKey = String(raw.jira_project_key ?? '').trim();
+    this.jiraVerifyResult.set(null);
+    if (!psaKey || !projectKey) {
+      this.jiraVerifyResult.set({ ok: false, error: 'Udfyld både Jira PSA key og Jira project key.' });
+      return;
+    }
+
+    this.jiraVerifyBusy.set(true);
+    try {
+      const resp = await this.ipc.verifyJiraIdentity(psaKey);
+      this.jiraVerifyResult.set(resp);
+    } catch (err) {
+      this.jiraVerifyResult.set({ ok: false, error: String(err) });
+    } finally {
+      this.jiraVerifyBusy.set(false);
+    }
+  }
 }

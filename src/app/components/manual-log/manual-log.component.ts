@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
 import { IpcService } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
+import { preserveCategoryDescriptions } from '../shared/category-description.util';
 
 @Component({
   selector: 'manual-log',
@@ -15,17 +16,17 @@ export class ManualLogComponent implements OnInit {
   ipc = inject(IpcService);
   private router = inject(Router);
 
-  date = new Date().toISOString().slice(0,10);
-  start = '08:00';
-  end = '09:00';
-  description = '';
-  category = '';
-  andetDescription = '';
+  date = signal(new Date().toISOString().slice(0,10));
+  start = signal('08:00');
+  end = signal('09:00');
+  description = signal('');
+  category = signal('');
+  andetDescription = signal('');
   // Removed suggestion feature: no predictive category logic.
   categoryGroups: CategoryGroup[] = CATEGORY_GROUPS;
   recent = this.ipc.recent; // recent reusable descriptions/categories
   unmatchedCategory(): boolean {
-    const c = this.category?.trim();
+    const c = this.category().trim();
     if (!c) return false;
     return !this.categoryGroups.some(g => g.items.includes(c));
   }
@@ -38,8 +39,17 @@ export class ManualLogComponent implements OnInit {
 
   async submit() {
     this.error.set('');
-    const [sh,sm] = this.start.split(':').map(Number);
-    const [eh,em] = this.end.split(':').map(Number);
+    const date = this.date();
+    const start = this.start();
+    const end = this.end();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { this.error.set('Invalid date format'); return; }
+    if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) { this.error.set('Invalid time format'); return; }
+    const [sh,sm] = start.split(':').map(Number);
+    const [eh,em] = end.split(':').map(Number);
+    if (![sh, sm, eh, em].every(Number.isFinite) || sh < 0 || sh > 23 || eh < 0 || eh > 23 || sm < 0 || sm > 59 || em < 0 || em > 59) {
+      this.error.set('Invalid time value');
+      return;
+    }
     const startMin = sh*60+sm, endMin = eh*60+em;
     if (endMin <= startMin) { this.error.set('End must be after start'); return; }
 
@@ -47,25 +57,38 @@ export class ManualLogComponent implements OnInit {
     const slots: string[] = [];
     for (let m = Math.floor(startMin/slot)*slot; m < endMin; m += slot) {
       const h = Math.floor(m/60), mm = m%60;
-      slots.push(`${this.date}T${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
+      slots.push(`${date}T${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
     }
-    const dayEntries = await window.workApi.getDayEntries(this.date);
-    const done = new Set(dayEntries.map((e:any)=> `${e.day}T${e.start}`));
-    const novel = slots.filter(k => !done.has(k));
+    const dayEntries = await window.workApi.getDayEntries(date);
+    const toMin = (hm: string): number => {
+      const [h, m] = String(hm ?? '').split(':').map(Number);
+      return Number.isFinite(h) && Number.isFinite(m) ? (h * 60 + m) : NaN;
+    };
+    const isCovered = (slotKey: string): boolean => {
+      const slotMin = toMin(slotKey.slice(11, 16));
+      if (!Number.isFinite(slotMin)) return false;
+      return dayEntries.some((e: any) => {
+        const es = toMin(e?.start);
+        const ee = toMin(e?.end);
+        return Number.isFinite(es) && Number.isFinite(ee) && ee > es && slotMin >= es && slotMin < ee;
+      });
+    };
+    const novel = slots.filter(k => !isCovered(k));
     if (!novel.length) { this.error.set('No new slots to save.'); return; }
 
-    let finalDescription = this.description;
-    if (this.category === 'Andet' && this.andetDescription.trim()) {
-      finalDescription = this.andetDescription.trim();
-    }
-    await this.ipc.submitPending(novel, finalDescription, this.category);
+    const category = this.category().trim();
+    const baseDescription = this.description().trim();
+    const otherDescription = this.andetDescription().trim();
+    let finalDescription = category === 'Andet' ? otherDescription : baseDescription;
+    if (!category || !finalDescription) { this.error.set('Description and category are required.'); return; }
+    await this.ipc.submitPending(novel, finalDescription, category);
     // Refresh signals for the affected day so Today/Day/Summary views update instantly
-    this.ipc.loadDay(this.date);
-    this.description=''; this.category=''; this.andetDescription='';
+    this.ipc.loadDay(date);
+    this.description.set(''); this.category.set(''); this.andetDescription.set('');
     if (!this.dialogMode()) {
       // Page mode: navigate to summary view for the date with snackbar notification state
       try {
-        this.router.navigate(['/summary', this.date], { state: { snackbar: 'Manuel registrering tilføjet' }});
+        this.router.navigate(['/summary', date], { state: { snackbar: 'Manuel registrering tilføjet' }});
       } catch { /* navigation errors ignored */ }
     } else {
       // Dialog mode: simply close
@@ -77,7 +100,7 @@ export class ManualLogComponent implements OnInit {
     // Prefill date if initialDate provided (dialog mode usage)
     const d = this.initialDate();
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      this.date = d;
+      this.date.set(d);
     }
   }
 
@@ -85,16 +108,22 @@ export class ManualLogComponent implements OnInit {
     if (!v) return;
     const [desc, cat] = v.split('||');
     if (cat === 'Andet') {
-      this.category = 'Andet';
+      this.category.set('Andet');
       if (desc) {
-        this.andetDescription = desc;
-        this.description = '';
+        this.andetDescription.set(desc);
+        this.description.set('');
       }
     } else {
-      if (desc) this.description = desc;
-      if (cat) this.category = cat;
-      if (this.category !== 'Andet') this.andetDescription = '';
+      if (desc) this.description.set(desc);
+      if (cat) this.category.set(cat);
+      if (this.category() !== 'Andet') this.andetDescription.set('');
     }
+  }
+
+  onCategoryChange(nextCategory: string) {
+    const next = preserveCategoryDescriptions(nextCategory, this.description(), this.andetDescription());
+    this.description.set(next.description);
+    this.andetDescription.set(next.andetDescription);
   }
 
 }

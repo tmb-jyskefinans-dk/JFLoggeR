@@ -5,6 +5,7 @@ const tslib_1 = require("tslib");
 const electron_1 = require("electron");
 const node_path_1 = tslib_1.__importDefault(require("node:path"));
 const node_fs_1 = tslib_1.__importDefault(require("node:fs"));
+const node_https_1 = tslib_1.__importDefault(require("node:https"));
 // Lightweight structured logging to file + console. Rotates by day (new file per day).
 function ensureLogDir() {
     const dir = node_path_1.default.join(electron_1.app.getPath('userData'), 'logs');
@@ -35,17 +36,75 @@ function writeLog(level, message, meta) {
     }
     catch (e) { /* last-chance; avoid throwing in logger */ }
 }
+const CORPORATE_JIRA_ORIGIN = 'https://app-jira.corp.jyskebank.net';
+const corporateJiraAgent = new node_https_1.default.Agent({ rejectUnauthorized: false });
+function fetchCorporateJiraJson(url, headers) {
+    return new Promise((resolve, reject) => {
+        const req = node_https_1.default.request(url, {
+            method: 'GET',
+            headers,
+            agent: corporateJiraAgent
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+            res.on('end', () => {
+                const bodyText = Buffer.concat(chunks).toString('utf8');
+                const status = res.statusCode ?? 500;
+                resolve({
+                    status,
+                    ok: status >= 200 && status < 300,
+                    json: async () => bodyText ? JSON.parse(bodyText) : {}
+                });
+            });
+        });
+        req.on('error', reject);
+        req.end();
+    });
+}
+let fatalShutdownInProgress = false;
+function handleFatalProcessError(kind, error) {
+    const err = error;
+    writeLog(kind, err?.message || String(error), {
+        stack: err?.stack,
+        reason: kind === 'unhandledRejection' ? error : undefined
+    });
+    // Prevent duplicate shutdown attempts when multiple fatal errors arrive.
+    if (fatalShutdownInProgress)
+        return;
+    fatalShutdownInProgress = true;
+    try {
+        win?.webContents.send('app:fatal-error', { kind, message: err?.message || String(error) });
+    }
+    catch { }
+    if (!electron_1.app.isPackaged) {
+        // Keep development sessions alive for faster debugging after logging the failure.
+        fatalShutdownInProgress = false;
+        return;
+    }
+    setTimeout(() => {
+        try {
+            electron_1.app.exit(1);
+        }
+        catch { }
+    }, 1500);
+    try {
+        electron_1.app.quit();
+    }
+    catch { }
+}
 // Capture process-level failures early
 process.on('uncaughtException', (err) => {
-    writeLog('uncaughtException', err?.message || String(err), { stack: err?.stack });
+    handleFatalProcessError('uncaughtException', err);
 });
 process.on('unhandledRejection', (reason) => {
-    writeLog('unhandledRejection', typeof reason === 'string' ? reason : (reason?.message || 'promise rejection'), { reason });
+    handleFatalProcessError('unhandledRejection', reason);
 });
 const db_1 = require("./db");
 const stale_1 = require("./stale");
 const db_2 = require("./db");
+const auth_1 = require("./auth");
 const time_1 = require("./time");
+const jira_search_1 = require("./jira-search");
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
 try {
@@ -131,6 +190,43 @@ let staleCheckHandle = null;
 let lastStaleNotifiedKey = null;
 let digestQueue = []; // slots accumulated while user away
 let lastEntryEndTime = null; // for stale detection heuristics
+let jiraMyselfCache = null;
+async function resolveJiraIdentity(psaKey) {
+    if (!psaKey)
+        return undefined;
+    if (jiraMyselfCache && jiraMyselfCache.psaKey === psaKey) {
+        return {
+            accountId: jiraMyselfCache.accountId,
+            displayName: jiraMyselfCache.displayName,
+            emailAddress: jiraMyselfCache.emailAddress
+        };
+    }
+    try {
+        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/myself`;
+        const res = await fetchCorporateJiraJson(url, {
+            Accept: 'application/json',
+            Authorization: `Bearer ${psaKey}`
+        });
+        if (!res.ok) {
+            jiraMyselfCache = { psaKey };
+            return undefined;
+        }
+        const data = await res.json();
+        const accountId = String(data.accountId ?? data.key ?? data.name ?? '').trim() || undefined;
+        const displayName = String(data.displayName ?? '').trim() || undefined;
+        const emailAddress = String(data.emailAddress ?? '').trim() || undefined;
+        jiraMyselfCache = { psaKey, accountId, displayName, emailAddress };
+        return { accountId, displayName, emailAddress };
+    }
+    catch {
+        jiraMyselfCache = { psaKey };
+        return undefined;
+    }
+}
+async function resolveJiraAccountId(psaKey) {
+    const identity = await resolveJiraIdentity(psaKey);
+    return identity?.accountId;
+}
 // Centralized helper to add a slot key to the pending set and notify renderer.
 // Optionally suppress immediate event for bulk operations (caller emits once afterwards).
 function enqueuePending(key, opts = {}) {
@@ -222,9 +318,9 @@ function showDigestNotification() {
             }
             catch { }
             // Open prompt for earliest slot captured at notification creation time.
-            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(firstSlot) });
+            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(firstSlot), source: 'notification' });
             // Force open dialog even if slot was previously handled so user can re-log or review.
-            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(firstSlot) });
+            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(firstSlot), source: 'notification' });
         }
     });
     n.show();
@@ -263,9 +359,9 @@ function notifyForSlot(slot) {
             }
             catch { }
             console.log('[main] notification click -> prompt:open', (0, time_1.slotKey)(slot));
-            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
+            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
             // Also force dialog open regardless of prior handled state.
-            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot) });
+            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
         }
         else {
             console.warn('[main] notification clicked but window is null');
@@ -318,9 +414,7 @@ function scheduleTicker() {
                 const key = (0, time_1.slotKey)(prevStart);
                 // Guard against re-queueing already logged slot
                 const day = (0, time_1.toLocalDateYMD)(prevStart);
-                const hh = `${prevStart.getHours()}`.padStart(2, '0');
-                const mm = `${prevStart.getMinutes()}`.padStart(2, '0');
-                const alreadyLogged = (0, db_1.getDayEntries)(day).some(e => e.day === day && e.start === `${hh}:${mm}`);
+                const alreadyLogged = isSlotCoveredByEntries(prevStart, (0, db_1.getDayEntries)(day));
                 if (!alreadyLogged) {
                     enqueuePending(key); // emits queue:updated
                     try {
@@ -352,7 +446,7 @@ function scheduleTicker() {
                         }
                         catch { }
                         console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
-                        win?.webContents.send('prompt:open', { slot: key });
+                        win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
                     }
                 }
             }
@@ -389,8 +483,8 @@ function scheduleStaleCheck() {
                             win.focus();
                         }
                         catch { }
-                        win?.webContents.send('prompt:open', { slot: result.key });
-                        win?.webContents.send('dialog:open-log', { slot: result.key });
+                        win?.webContents.send('prompt:open', { slot: result.key, source: 'notification' });
+                        win?.webContents.send('dialog:open-log', { slot: result.key, source: 'notification' });
                     }
                 });
                 n.show();
@@ -399,11 +493,28 @@ function scheduleStaleCheck() {
         catch { /* ignore */ }
     }, 60000);
 }
+function hmToMinutes(hm) {
+    const { h, m } = (0, time_1.parseHM)(String(hm ?? '00:00'));
+    return h * 60 + m;
+}
+/** Returns true when slot start is already covered by an existing logged interval on that day. */
+function isSlotCoveredByEntries(slotStart, entries) {
+    const slotStartMinutes = slotStart.getHours() * 60 + slotStart.getMinutes();
+    for (const e of entries) {
+        const startM = hmToMinutes(e.start);
+        const endM = hmToMinutes(e.end);
+        if (!Number.isFinite(startM) || !Number.isFinite(endM) || endM <= startM)
+            continue;
+        if (slotStartMinutes >= startM && slotStartMinutes < endM)
+            return true;
+    }
+    return false;
+}
 function rebuildBacklogForToday({ includeFuture = false } = {}) {
-    // Build backlog only for past (and optionally current) unlogged slots.
+    // Build backlog only for finished unlogged slots.
     const now = new Date();
     const day = (0, time_1.toLocalDateYMD)(now);
-    const done = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
+    const dayEntries = (0, db_1.getDayEntries)(day);
     pending.clear();
     const slots = (0, time_1.daySlots)(now); // already filtered by workday
     if (!slots.length) {
@@ -417,7 +528,7 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
         if (!includeFuture && slotEnd.getTime() > now.getTime())
             break; // stop at first slot that hasn't ended
         const key = (0, time_1.slotKey)(slot);
-        if (!done.has(key))
+        if (!isSlotCoveredByEntries(slot, dayEntries))
             enqueuePending(key, { silent: true });
     }
     // Single emit after bulk rebuild
@@ -431,7 +542,7 @@ function rebuildBacklogForToday({ includeFuture = false } = {}) {
 function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
     const now = new Date();
     const day = (0, time_1.toLocalDateYMD)(now);
-    const existing = new Set((0, db_1.getDayEntries)(day).map((e) => `${e.day}T${e.start}`));
+    const dayEntries = (0, db_1.getDayEntries)(day);
     pending.clear();
     const slots = (0, time_1.daySlots)(now);
     if (!slots.length) {
@@ -442,26 +553,55 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false } = {}) {
         // Only add to pending if the slot's END time is in the past
         const slotEnd = new Date(slot.getTime() + (0, time_1.getSlotMinutes)() * 60000);
         const key = (0, time_1.slotKey)(slot);
-        if (existing.has(key))
-            continue; // already logged
+        if (isSlotCoveredByEntries(slot, dayEntries))
+            continue; // already logged by an interval covering this slot
         if (!includeFuture && slotEnd.getTime() > now.getTime())
             break; // stop at first slot that hasn't ended
-        if (!doneOrLogged(key))
-            enqueuePending(key, { silent: true });
+        enqueuePending(key, { silent: true });
     }
     try {
         win?.webContents.send('queue:updated');
     }
     catch { }
-    function doneOrLogged(key) { return existing.has(key); }
+}
+function logIpcFailure(channel, err) {
+    const error = err;
+    writeLog('error', `IPC handler failed: ${channel}`, {
+        message: error?.message ?? String(err),
+        stack: error?.stack
+    });
 }
 // IPC handlers
 console.log('[main] registering IPC handlers...');
-electron_1.ipcMain.handle('db:get-day', (_e, day) => (0, db_1.getDayEntries)(day));
-electron_1.ipcMain.handle('db:get-days', () => (0, db_1.getDays)());
+electron_1.ipcMain.handle('db:get-day', (_e, day) => {
+    try {
+        return (0, db_1.getDayEntries)(day);
+    }
+    catch (e) {
+        logIpcFailure('db:get-day', e);
+        throw e;
+    }
+});
+electron_1.ipcMain.handle('db:get-days', () => {
+    try {
+        return (0, db_1.getDays)();
+    }
+    catch (e) {
+        logIpcFailure('db:get-days', e);
+        throw e;
+    }
+});
 electron_1.ipcMain.handle('db:get-external-logged', (_e, day) => ({ day, exported: (0, db_2.getExternalLogged)(day) }));
 electron_1.ipcMain.handle('db:set-external-logged', (_e, day, exported) => (0, db_2.setExternalLogged)(day, exported));
-electron_1.ipcMain.handle('db:save-entries', (_e, entries) => (0, db_1.saveEntries)(entries));
+electron_1.ipcMain.handle('db:save-entries', (_e, entries) => {
+    try {
+        return (0, db_1.saveEntries)(entries);
+    }
+    catch (e) {
+        logIpcFailure('db:save-entries', e);
+        throw e;
+    }
+});
 electron_1.ipcMain.handle('db:import-external', (_e, raw) => {
     try {
         const result = (0, db_1.importExternalLines)(String(raw ?? ''));
@@ -473,7 +613,15 @@ electron_1.ipcMain.handle('db:import-external', (_e, raw) => {
         return { ok: false, error: String(e) };
     }
 });
-electron_1.ipcMain.handle('db:get-summary', (_e, day) => (0, db_1.getSummary)(day));
+electron_1.ipcMain.handle('db:get-summary', (_e, day) => {
+    try {
+        return (0, db_1.getSummary)(day);
+    }
+    catch (e) {
+        logIpcFailure('db:get-summary', e);
+        throw e;
+    }
+});
 electron_1.ipcMain.handle('db:get-recent', (_e, limit) => (0, db_1.getDistinctRecent)(limit ?? 20));
 electron_1.ipcMain.handle('db:get-recent-today', (_e, limit) => (0, db_1.getDistinctRecentToday)(limit ?? 20));
 // Settings handlers (missing previously)
@@ -497,22 +645,201 @@ electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
     catch { }
     return { ok: true, settings: after };
 });
+electron_1.ipcMain.handle('auth:get-status', () => auth_1.azureAuth.getStatus());
+electron_1.ipcMain.handle('auth:signin', async () => {
+    const result = await auth_1.azureAuth.signInInteractive();
+    if (!result.ok) {
+        writeLog('warn', 'Azure sign-in failed', { error: result.error });
+    }
+    return result;
+});
+electron_1.ipcMain.handle('auth:signout', async () => {
+    const result = await auth_1.azureAuth.signOut();
+    writeLog('info', 'Azure sign-out completed');
+    return result;
+});
+electron_1.ipcMain.handle('jira:search-issues', async (_e, payload) => {
+    try {
+        const term = String(payload?.term ?? '').trim();
+        if (term.length < 2)
+            return { ok: true, items: [] };
+        const settings = (0, db_1.getSettings)();
+        const psaKey = String(settings.jira_psa_key ?? '').trim();
+        const projectKey = String(settings.jira_project_key ?? '').trim().toUpperCase();
+        if (!psaKey || !projectKey) {
+            return { ok: false, error: 'Jira PSA key eller project key mangler i indstillinger.' };
+        }
+        const escapedTerm = term.replace(/"/g, '\\"');
+        const keyCandidate = term.toUpperCase().replace(/"/g, '\\"');
+        const clauses = [`summary ~ "${escapedTerm}*"`];
+        if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(term)) {
+            clauses.unshift(`key = "${keyCandidate}"`);
+        }
+        const query = encodeURIComponent(`project = ${projectKey} AND (${clauses.join(' OR ')}) ORDER BY created DESC`);
+        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/search?jql=${query}&fields=key,summary,issuetype,assignee,reporter,customfield_10060&maxResults=10`;
+        const res = await fetchCorporateJiraJson(url, {
+            Accept: 'application/json',
+            Authorization: `Bearer ${psaKey}`
+        });
+        if (!res.ok) {
+            return { ok: false, error: `Jira opslag fejlede (${res.status}).` };
+        }
+        const data = await res.json();
+        const currentAccountId = await resolveJiraAccountId(psaKey);
+        const items = (0, jira_search_1.mapAndRankJiraIssues)(data.issues ?? [], term, currentAccountId);
+        return { ok: true, items };
+    }
+    catch (e) {
+        console.log('Jira search failed', e);
+        logIpcFailure('jira:search-issues', e);
+        return { ok: false, error: 'Jira opslag fejlede.' };
+    }
+});
+electron_1.ipcMain.handle('jira:verify-identity', async (_e, payload) => {
+    try {
+        const settings = (0, db_1.getSettings)();
+        const psaKey = String(payload?.psaKey ?? settings.jira_psa_key ?? '').trim();
+        if (!psaKey) {
+            return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+        }
+        const identity = await resolveJiraIdentity(psaKey);
+        if (!identity?.accountId) {
+            return { ok: false, error: 'PSA key kunne ikke verificeres mod Jira /myself.' };
+        }
+        return {
+            ok: true,
+            accountId: identity.accountId,
+            displayName: identity.displayName,
+            emailAddress: identity.emailAddress
+        };
+    }
+    catch (e) {
+        logIpcFailure('jira:verify-identity', e);
+        return { ok: false, error: 'Jira verifikation fejlede.' };
+    }
+});
+// Categories in 'Udvikling Projekter' group that support Jira worklog posting
+const JIRA_WORKLOG_CATEGORIES = new Set([
+    'Udvikling (prioriterede jf. projektoversigten)',
+    'Estimering'
+]);
+function postCorporateJiraJson(url, headers, body) {
+    return new Promise((resolve, reject) => {
+        const bodyStr = JSON.stringify(body);
+        const req = node_https_1.default.request(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
+            agent: corporateJiraAgent
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+            res.on('end', () => {
+                const bodyText = Buffer.concat(chunks).toString('utf8');
+                const status = res.statusCode ?? 500;
+                resolve({ status, ok: status >= 200 && status < 300, json: async () => bodyText ? JSON.parse(bodyText) : {} });
+            });
+        });
+        req.on('error', reject);
+        req.write(bodyStr);
+        req.end();
+    });
+}
+electron_1.ipcMain.handle('jira:log-worklog', async (_e, payload) => {
+    try {
+        const day = String(payload?.day ?? '').trim();
+        if (!day)
+            return { ok: false, error: 'Dag mangler.' };
+        const settings = (0, db_1.getSettings)();
+        const psaKey = String(settings.jira_psa_key ?? '').trim();
+        if (!psaKey)
+            return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+        const entries = (0, db_1.getDayEntries)(day).filter((e) => JIRA_WORKLOG_CATEGORIES.has(e.category));
+        if (!entries.length)
+            return { ok: true, results: [] };
+        // Aggregate seconds + earliest start per Jira key
+        const aggr = new Map();
+        for (const entry of entries) {
+            const m = entry.description?.match(/^([A-Z]+-\d+)\s*-\s*/);
+            if (!m)
+                continue;
+            const key = m[1];
+            const [sh, sm] = entry.start.split(':').map(Number);
+            const [eh, em] = entry.end.split(':').map(Number);
+            const seconds = ((eh * 60 + em) - (sh * 60 + sm)) * 60;
+            if (seconds <= 0)
+                continue;
+            const existing = aggr.get(key);
+            if (existing) {
+                existing.seconds += seconds;
+                if (entry.start < existing.earliest)
+                    existing.earliest = entry.start;
+            }
+            else {
+                aggr.set(key, { seconds, earliest: entry.start });
+            }
+        }
+        if (!aggr.size)
+            return { ok: true, results: [] };
+        const [y, mo, d] = day.split('-').map(Number);
+        const authHeaders = { Accept: 'application/json', Authorization: `Bearer ${psaKey}` };
+        const results = [];
+        for (const [key, { seconds, earliest }] of aggr) {
+            try {
+                const [hh, mm] = earliest.split(':').map(Number);
+                const started = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
+                const pad2 = (n) => String(n).padStart(2, '0');
+                const tz = -started.getTimezoneOffset();
+                const tzSign = tz >= 0 ? '+' : '-';
+                const tzH = pad2(Math.floor(Math.abs(tz) / 60));
+                const tzM = pad2(Math.abs(tz) % 60);
+                const startedStr = `${day}T${pad2(hh)}:${pad2(mm)}:00.000${tzSign}${tzH}${tzM}`;
+                const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/issue/${key}/worklog`;
+                const res = await postCorporateJiraJson(url, authHeaders, {
+                    timeSpentSeconds: seconds,
+                    started: startedStr,
+                    comment: 'Logged via JFLoggeR'
+                });
+                if (res.ok) {
+                    results.push({ key, seconds, success: true });
+                }
+                else {
+                    results.push({ key, seconds, success: false, error: `HTTP ${res.status}` });
+                }
+            }
+            catch (e) {
+                results.push({ key, seconds, success: false, error: String(e) });
+            }
+        }
+        const allOk = results.every(r => r.success);
+        return { ok: allOk, results };
+    }
+    catch (e) {
+        logIpcFailure('jira:log-worklog', e);
+        return { ok: false, error: 'Jira worklog fejlede.' };
+    }
+});
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
 electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
-    const removed = (0, db_1.deleteEntry)(day, start);
     try {
-        // If the slot is in the past (earlier than now), add back to pending so user can re-log
-        const [y, m, d] = day.split('-').map(Number);
-        const [hh, mm] = start.split(':').map(Number);
-        const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
-        const now = new Date();
-        const isToday = day === (0, time_1.toLocalDateYMD)(now);
-        const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && (0, time_1.isWorkdayEnabled)(slotDate);
-        if (shouldRequeue)
-            enqueuePending(`${day}T${start}`); // emits queue:updated
+        const removed = (0, db_1.deleteEntry)(day, start);
+        try {
+            // If the slot is in the past (earlier than now), add back to pending so user can re-log
+            const [y, m, d] = day.split('-').map(Number);
+            const [hh, mm] = start.split(':').map(Number);
+            const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+            const now = new Date();
+            const isToday = day === (0, time_1.toLocalDateYMD)(now);
+            const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && (0, time_1.isWorkdayEnabled)(slotDate);
+            if (shouldRequeue)
+                enqueuePending(`${day}T${start}`); // emits queue:updated
+        }
+        catch { /* ignore parse errors */ }
+        return { ok: true, removed };
     }
-    catch { /* ignore parse errors */ }
-    return { ok: true, removed };
+    catch (e) {
+        logIpcFailure('db:delete-entry', e);
+        return { ok: false, removed: 0, error: String(e) };
+    }
 });
 // Generic renderer -> main log sink
 electron_1.ipcMain.handle('log:write', (_e, entry) => {
@@ -524,29 +851,68 @@ electron_1.ipcMain.handle('log:write', (_e, entry) => {
         return { ok: false, error: String(e) };
     }
 });
-electron_1.ipcMain.handle('queue:get', () => Array.from(pending).sort());
+electron_1.ipcMain.handle('queue:get', () => {
+    return Array.from(pending).sort();
+});
 electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
-    const groupedByDay = new Map();
-    payload.slots.forEach((k) => {
-        const [day, hm] = k.split('T');
-        const [h, m] = hm.split(':');
-        const slotLen = (0, time_1.getSlotMinutes)();
-        const endMin = (Number(m) + slotLen) % 60;
-        const endHour = endMin === 0 ? Number(h) + 1 : Number(h);
-        const entry = {
-            day,
-            start: `${h}:${m}`,
-            end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
-            description: payload.description.trim(),
-            category: payload.category.trim()
-        };
-        if (!groupedByDay.has(day))
-            groupedByDay.set(day, []);
-        groupedByDay.get(day).push(entry);
-        if (pending.has(k))
-            pending.delete(k);
-    });
-    groupedByDay.forEach((list) => (0, db_1.saveEntries)(list));
+    try {
+        if (!payload || !Array.isArray(payload.slots))
+            return { ok: false, error: 'Invalid payload' };
+        const description = String(payload.description ?? '').trim();
+        const category = String(payload.category ?? '').trim();
+        if (!description || !category)
+            return { ok: false, error: 'Description and category are required' };
+        const groupedByDay = new Map();
+        const coverageByDay = new Map();
+        const consumedKeys = [];
+        for (const k of payload.slots) {
+            if (typeof k !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(k)) {
+                return { ok: false, error: `Invalid slot key: ${String(k)}` };
+            }
+            const [day, hm] = k.split('T');
+            const [h, m] = hm.split(':');
+            const hh = Number(h);
+            const mm = Number(m);
+            if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+                return { ok: false, error: `Invalid slot time: ${k}` };
+            }
+            if (!coverageByDay.has(day)) {
+                coverageByDay.set(day, (0, db_1.getDayEntries)(day).map(e => ({ start: e.start, end: e.end })));
+            }
+            const [y, mo, d] = day.split('-').map(Number);
+            const slotStart = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
+            const dayCoverage = coverageByDay.get(day);
+            if (isSlotCoveredByEntries(slotStart, dayCoverage)) {
+                consumedKeys.push(k);
+                continue;
+            }
+            const slotLen = (0, time_1.getSlotMinutes)();
+            const endTotal = hh * 60 + mm + slotLen;
+            const endMin = endTotal % 60;
+            const endHour = Math.floor(endTotal / 60) % 24;
+            const entry = {
+                day,
+                start: `${h}:${m}`,
+                end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
+                description,
+                category
+            };
+            if (!groupedByDay.has(day))
+                groupedByDay.set(day, []);
+            groupedByDay.get(day).push(entry);
+            dayCoverage.push({ start: entry.start, end: entry.end });
+            consumedKeys.push(k);
+        }
+        groupedByDay.forEach((list) => (0, db_1.saveEntries)(list));
+        for (const key of consumedKeys) {
+            if (pending.has(key))
+                pending.delete(key);
+        }
+    }
+    catch (e) {
+        logIpcFailure('queue:submit', e);
+        return { ok: false, error: String(e) };
+    }
     // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
     try {
         win?.webContents.send('queue:updated');
@@ -567,6 +933,12 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
     }
     catch { }
     updateTrayTooltip();
+    if (payload?.minimizeWindowAfterSubmit) {
+        try {
+            win?.minimize();
+        }
+        catch { }
+    }
     return { ok: true };
 });
 // Debug notification trigger (manual test without waiting for scheduler)
@@ -578,8 +950,8 @@ electron_1.ipcMain.handle('debug:notify', (_e, opts) => {
     n.on('click', () => {
         win?.show();
         win?.focus();
-        win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot) });
-        win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot) });
+        win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
+        win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
     });
     n.show();
     return { ok: true };
@@ -645,8 +1017,8 @@ electron_1.app.whenReady().then(() => {
                         const prev = (0, time_1.previousSlotStart)(new Date());
                         const key = (0, time_1.slotKey)(prev);
                         // Emit both prompt (for selection logic) and a manual dialog open event that bypasses handledPromptSlot gating.
-                        win?.webContents.send('prompt:open', { slot: key });
-                        win?.webContents.send('dialog:open-log', { slot: key });
+                        win?.webContents.send('prompt:open', { slot: key, source: 'tray' });
+                        win?.webContents.send('dialog:open-log', { slot: key, source: 'tray' });
                     }
                 },
                 {

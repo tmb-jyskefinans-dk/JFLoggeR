@@ -1,5 +1,7 @@
 import { Injectable, signal, ErrorHandler, inject } from '@angular/core';
 
+let globalForwardingInstalled = false;
+
 // Lightweight logging service that forwards to Electron main (file sink) and keeps recent entries in memory for optional UI.
 export interface LogEntry { ts: string; level: string; message: string; meta?: any; }
 
@@ -45,6 +47,7 @@ export class GlobalErrorHandler implements ErrorHandler {
 
 // Optional helper to install global listeners outside Angular zone (window.onerror & unhandledrejection)
 export function installGlobalErrorForwarding(logger: LogService) {
+  if (globalForwardingInstalled) return;
   try {
     window.addEventListener('error', (ev) => {
       logger.error('Window error', { message: ev.error?.message || ev.message, stack: ev.error?.stack });
@@ -52,5 +55,6 @@ export function installGlobalErrorForwarding(logger: LogService) {
     window.addEventListener('unhandledrejection', (ev) => {
       logger.error('Unhandled promise rejection', { reason: ev.reason });
     });
+    globalForwardingInstalled = true;
   } catch { /* ignore */ }
 }

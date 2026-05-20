@@ -2,6 +2,7 @@
 import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import https from 'node:https';
 
 // Lightweight structured logging to file + console. Rotates by day (new file per day).
 function ensureLogDir(): string {
@@ -26,12 +27,67 @@ function writeLog(level: string, message: string, meta?: any) {
   } catch (e) { /* last-chance; avoid throwing in logger */ }
 }
 
+const CORPORATE_JIRA_ORIGIN = 'https://app-jira.corp.jyskebank.net';
+const corporateJiraAgent = new https.Agent({ rejectUnauthorized: false });
+
+function fetchCorporateJiraJson(url: string, headers: Record<string, string>) {
+  return new Promise<{ status: number; ok: boolean; json: () => Promise<unknown> }>((resolve, reject) => {
+    const req = https.request(url, {
+      method: 'GET',
+      headers,
+      agent: corporateJiraAgent
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on('end', () => {
+        const bodyText = Buffer.concat(chunks).toString('utf8');
+        const status = res.statusCode ?? 500;
+        resolve({
+          status,
+          ok: status >= 200 && status < 300,
+          json: async () => bodyText ? JSON.parse(bodyText) : {}
+        });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+let fatalShutdownInProgress = false;
+
+function handleFatalProcessError(kind: 'uncaughtException' | 'unhandledRejection', error: unknown) {
+  const err = error as { message?: string; stack?: string };
+  writeLog(kind, err?.message || String(error), {
+    stack: err?.stack,
+    reason: kind === 'unhandledRejection' ? error : undefined
+  });
+
+  // Prevent duplicate shutdown attempts when multiple fatal errors arrive.
+  if (fatalShutdownInProgress) return;
+  fatalShutdownInProgress = true;
+
+  try { win?.webContents.send('app:fatal-error', { kind, message: err?.message || String(error) }); } catch { }
+
+  if (!app.isPackaged) {
+    // Keep development sessions alive for faster debugging after logging the failure.
+    fatalShutdownInProgress = false;
+    return;
+  }
+
+  setTimeout(() => {
+    try { app.exit(1); } catch { }
+  }, 1500);
+
+  try { app.quit(); } catch { }
+}
+
 // Capture process-level failures early
 process.on('uncaughtException', (err) => {
-  writeLog('uncaughtException', err?.message || String(err), { stack: err?.stack });
+  handleFatalProcessError('uncaughtException', err);
 });
-process.on('unhandledRejection', (reason: any) => {
-  writeLog('unhandledRejection', typeof reason === 'string' ? reason : (reason?.message || 'promise rejection'), { reason });
+process.on('unhandledRejection', (reason: unknown) => {
+  handleFatalProcessError('unhandledRejection', reason);
 });
 
 import {
@@ -49,6 +105,7 @@ import {
 } from './db';
 import { computeStaleSlot } from './stale';
 import { setExternalLogged, getExternalLogged } from './db';
+import { azureAuth } from './auth';
 
 import {
   nextQuarter,
@@ -61,6 +118,7 @@ import {
   getSlotMinutes,
   parseHM
 } from './time';
+import { JiraApiIssue, mapAndRankJiraIssues } from './jira-search';
 
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
@@ -137,6 +195,59 @@ let staleCheckHandle: NodeJS.Timeout | null = null;
 let lastStaleNotifiedKey: string | null = null;
 let digestQueue: Date[] = []; // slots accumulated while user away
 let lastEntryEndTime: Date | null = null; // for stale detection heuristics
+let jiraMyselfCache: { psaKey: string; accountId?: string; displayName?: string; emailAddress?: string } | null = null;
+
+type JiraMyselfResponse = {
+  accountId?: unknown;
+  key?: unknown;
+  name?: unknown;
+  displayName?: unknown;
+  emailAddress?: unknown;
+};
+
+type JiraResolvedIdentity = {
+  accountId?: string;
+  displayName?: string;
+  emailAddress?: string;
+};
+
+async function resolveJiraIdentity(psaKey: string): Promise<JiraResolvedIdentity | undefined> {
+  if (!psaKey) return undefined;
+  if (jiraMyselfCache && jiraMyselfCache.psaKey === psaKey) {
+    return {
+      accountId: jiraMyselfCache.accountId,
+      displayName: jiraMyselfCache.displayName,
+      emailAddress: jiraMyselfCache.emailAddress
+    };
+  }
+
+  try {
+    const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/myself`;
+    const res = await fetchCorporateJiraJson(url, {
+      Accept: 'application/json',
+      Authorization: `Bearer ${psaKey}`
+    });
+    if (!res.ok) {
+      jiraMyselfCache = { psaKey };
+      return undefined;
+    }
+
+    const data = await res.json() as JiraMyselfResponse;
+    const accountId = String(data.accountId ?? data.key ?? data.name ?? '').trim() || undefined;
+    const displayName = String(data.displayName ?? '').trim() || undefined;
+    const emailAddress = String(data.emailAddress ?? '').trim() || undefined;
+    jiraMyselfCache = { psaKey, accountId, displayName, emailAddress };
+    return { accountId, displayName, emailAddress };
+  } catch {
+    jiraMyselfCache = { psaKey };
+    return undefined;
+  }
+}
+
+async function resolveJiraAccountId(psaKey: string): Promise<string | undefined> {
+  const identity = await resolveJiraIdentity(psaKey);
+  return identity?.accountId;
+}
 
 // Centralized helper to add a slot key to the pending set and notify renderer.
 // Optionally suppress immediate event for bulk operations (caller emits once afterwards).
@@ -214,9 +325,9 @@ function showDigestNotification() {
       try { if (win.isMinimized()) win.restore(); } catch { }
       try { win.show(); win.focus(); } catch { }
       // Open prompt for earliest slot captured at notification creation time.
-      win?.webContents.send('prompt:open', { slot: slotKey(firstSlot) });
+      win?.webContents.send('prompt:open', { slot: slotKey(firstSlot), source: 'notification' });
       // Force open dialog even if slot was previously handled so user can re-log or review.
-      win?.webContents.send('dialog:open-log', { slot: slotKey(firstSlot) });
+      win?.webContents.send('dialog:open-log', { slot: slotKey(firstSlot), source: 'notification' });
     }
   });
   n.show();
@@ -239,9 +350,9 @@ function notifyForSlot(slot: Date) {
       try { win.focus(); } catch { }
       try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 400); } catch { }
       console.log('[main] notification click -> prompt:open', slotKey(slot));
-      win?.webContents.send('prompt:open', { slot: slotKey(slot) });
+      win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'notification' });
       // Also force dialog open regardless of prior handled state.
-      win?.webContents.send('dialog:open-log', { slot: slotKey(slot) });
+      win?.webContents.send('dialog:open-log', { slot: slotKey(slot), source: 'notification' });
     } else {
       console.warn('[main] notification clicked but window is null');
     }
@@ -279,9 +390,7 @@ function scheduleTicker() {
         const key = slotKey(prevStart);
         // Guard against re-queueing already logged slot
         const day = toLocalDateYMD(prevStart);
-        const hh = `${prevStart.getHours()}`.padStart(2, '0');
-        const mm = `${prevStart.getMinutes()}`.padStart(2, '0');
-        const alreadyLogged = getDayEntries(day).some(e => e.day === day && e.start === `${hh}:${mm}`);
+        const alreadyLogged = isSlotCoveredByEntries(prevStart, getDayEntries(day) as Array<{ start: string; end: string }>);
         if (!alreadyLogged) {
           enqueuePending(key); // emits queue:updated
           try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch { }
@@ -292,7 +401,7 @@ function scheduleTicker() {
             try { win.focus(); } catch { }
             try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 350); } catch { }
             console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
-            win?.webContents.send('prompt:open', { slot: key });
+            win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
           }
         }
       }
@@ -321,8 +430,8 @@ function scheduleStaleCheck() {
         n.on('click', () => {
           if (win) {
             try { win.show(); win.focus(); } catch { }
-            win?.webContents.send('prompt:open', { slot: result.key });
-            win?.webContents.send('dialog:open-log', { slot: result.key });
+            win?.webContents.send('prompt:open', { slot: result.key, source: 'notification' });
+            win?.webContents.send('dialog:open-log', { slot: result.key, source: 'notification' });
           }
         });
         n.show();
@@ -331,11 +440,28 @@ function scheduleStaleCheck() {
   }, 60000);
 }
 
+function hmToMinutes(hm: string): number {
+  const { h, m } = parseHM(String(hm ?? '00:00'));
+  return h * 60 + m;
+}
+
+/** Returns true when slot start is already covered by an existing logged interval on that day. */
+function isSlotCoveredByEntries(slotStart: Date, entries: Array<{ start: string; end: string }>): boolean {
+  const slotStartMinutes = slotStart.getHours() * 60 + slotStart.getMinutes();
+  for (const e of entries) {
+    const startM = hmToMinutes(e.start);
+    const endM = hmToMinutes(e.end);
+    if (!Number.isFinite(startM) || !Number.isFinite(endM) || endM <= startM) continue;
+    if (slotStartMinutes >= startM && slotStartMinutes < endM) return true;
+  }
+  return false;
+}
+
 function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boolean } = {}) {
-  // Build backlog only for past (and optionally current) unlogged slots.
+  // Build backlog only for finished unlogged slots.
   const now = new Date();
   const day = toLocalDateYMD(now);
-  const done = new Set(getDayEntries(day).map((e: any) => `${e.day}T${e.start}`));
+  const dayEntries = getDayEntries(day) as Array<{ start: string; end: string }>;
   pending.clear();
   const slots = daySlots(now); // already filtered by workday
   if (!slots.length) {
@@ -348,7 +474,7 @@ function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boo
     const slotEnd = new Date(slot.getTime() + getSlotMinutes() * 60000);
     if (!includeFuture && slotEnd.getTime() > now.getTime()) break; // stop at first slot that hasn't ended
     const key = slotKey(slot);
-    if (!done.has(key)) enqueuePending(key, { silent: true });
+    if (!isSlotCoveredByEntries(slot, dayEntries)) enqueuePending(key, { silent: true });
   }
   // Single emit after bulk rebuild
   try { win?.webContents.send('queue:updated'); } catch { }
@@ -359,7 +485,7 @@ function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boo
 function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeFuture?: boolean } = {}) {
   const now = new Date();
   const day = toLocalDateYMD(now);
-  const existing = new Set(getDayEntries(day).map((e: any) => `${e.day}T${e.start}`));
+  const dayEntries = getDayEntries(day) as Array<{ start: string; end: string }>;
   pending.clear();
   const slots = daySlots(now);
   if (!slots.length) {
@@ -370,21 +496,49 @@ function rebuildPendingAfterSettingsChange({ includeFuture = false }: { includeF
     // Only add to pending if the slot's END time is in the past
     const slotEnd = new Date(slot.getTime() + getSlotMinutes() * 60000);
     const key = slotKey(slot);
-    if (existing.has(key)) continue; // already logged
+    if (isSlotCoveredByEntries(slot, dayEntries)) continue; // already logged by an interval covering this slot
     if (!includeFuture && slotEnd.getTime() > now.getTime()) break; // stop at first slot that hasn't ended
-    if (!doneOrLogged(key)) enqueuePending(key, { silent: true });
+    enqueuePending(key, { silent: true });
   }
   try { win?.webContents.send('queue:updated'); } catch { }
-  function doneOrLogged(key: string) { return existing.has(key); }
+}
+
+function logIpcFailure(channel: string, err: unknown) {
+  const error = err as { message?: string; stack?: string };
+  writeLog('error', `IPC handler failed: ${channel}`, {
+    message: error?.message ?? String(err),
+    stack: error?.stack
+  });
 }
 
 // IPC handlers
 console.log('[main] registering IPC handlers...');
-ipcMain.handle('db:get-day', (_e, day: string) => getDayEntries(day));
-ipcMain.handle('db:get-days', () => getDays());
+ipcMain.handle('db:get-day', (_e, day: string) => {
+  try {
+    return getDayEntries(day);
+  } catch (e) {
+    logIpcFailure('db:get-day', e);
+    throw e;
+  }
+});
+ipcMain.handle('db:get-days', () => {
+  try {
+    return getDays();
+  } catch (e) {
+    logIpcFailure('db:get-days', e);
+    throw e;
+  }
+});
 ipcMain.handle('db:get-external-logged', (_e, day: string) => ({ day, exported: getExternalLogged(day) }));
 ipcMain.handle('db:set-external-logged', (_e, day: string, exported: boolean) => setExternalLogged(day, exported));
-ipcMain.handle('db:save-entries', (_e, entries: any[]) => saveEntries(entries));
+ipcMain.handle('db:save-entries', (_e, entries: any[]) => {
+  try {
+    return saveEntries(entries);
+  } catch (e) {
+    logIpcFailure('db:save-entries', e);
+    throw e;
+  }
+});
 ipcMain.handle('db:import-external', (_e, raw: string) => {
   try {
     const result = importExternalLines(String(raw ?? ''));
@@ -395,7 +549,14 @@ ipcMain.handle('db:import-external', (_e, raw: string) => {
     return { ok: false, error: String(e) };
   }
 });
-ipcMain.handle('db:get-summary', (_e, day: string) => getSummary(day));
+ipcMain.handle('db:get-summary', (_e, day: string) => {
+  try {
+    return getSummary(day);
+  } catch (e) {
+    logIpcFailure('db:get-summary', e);
+    throw e;
+  }
+});
 ipcMain.handle('db:get-recent', (_e, limit?: number) =>
   getDistinctRecent(limit ?? 20)
 );
@@ -421,20 +582,206 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   return { ok: true, settings: after };
 });
 
+ipcMain.handle('auth:get-status', () => azureAuth.getStatus());
+ipcMain.handle('auth:signin', async () => {
+  const result = await azureAuth.signInInteractive();
+  if (!result.ok) {
+    writeLog('warn', 'Azure sign-in failed', { error: result.error });
+  }
+  return result;
+});
+ipcMain.handle('auth:signout', async () => {
+  const result = await azureAuth.signOut();
+  writeLog('info', 'Azure sign-out completed');
+  return result;
+});
+
+ipcMain.handle('jira:search-issues', async (_e, payload: { term?: string }) => {
+  try {
+    const term = String(payload?.term ?? '').trim();
+    if (term.length < 2) return { ok: true, items: [] };
+
+    const settings = getSettings();
+    const psaKey = String(settings.jira_psa_key ?? '').trim();
+    const projectKey = String(settings.jira_project_key ?? '').trim().toUpperCase();
+    if (!psaKey || !projectKey) {
+      return { ok: false, error: 'Jira PSA key eller project key mangler i indstillinger.' };
+    }
+    const escapedTerm = term.replace(/"/g, '\\"');
+    const keyCandidate = term.toUpperCase().replace(/"/g, '\\"');
+    const clauses = [`summary ~ "${escapedTerm}*"`];
+    if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(term)) {
+      clauses.unshift(`key = "${keyCandidate}"`);
+    }
+    const query = encodeURIComponent(
+      `project = ${projectKey} AND (${clauses.join(' OR ')}) ORDER BY created DESC`
+    );
+
+    const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/search?jql=${query}&fields=key,summary,issuetype,assignee,reporter,customfield_10060&maxResults=10`;
+    const res = await fetchCorporateJiraJson(url, {
+      Accept: 'application/json',
+      Authorization: `Bearer ${psaKey}`
+    });
+
+    if (!res.ok) {
+      return { ok: false, error: `Jira opslag fejlede (${res.status}).` };
+    }
+
+    const data = await res.json() as { issues?: JiraApiIssue[] };
+    const currentAccountId = await resolveJiraAccountId(psaKey);
+    const items = mapAndRankJiraIssues(data.issues ?? [], term, currentAccountId);
+
+    return { ok: true, items };
+  } catch (e) {
+    console.log('Jira search failed', e);
+    logIpcFailure('jira:search-issues', e);
+    return { ok: false, error: 'Jira opslag fejlede.' };
+  }
+});
+
+ipcMain.handle('jira:verify-identity', async (_e, payload?: { psaKey?: string }) => {
+  try {
+    const settings = getSettings();
+    const psaKey = String(payload?.psaKey ?? settings.jira_psa_key ?? '').trim();
+    if (!psaKey) {
+      return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+    }
+
+    const identity = await resolveJiraIdentity(psaKey);
+    if (!identity?.accountId) {
+      return { ok: false, error: 'PSA key kunne ikke verificeres mod Jira /myself.' };
+    }
+
+    return {
+      ok: true,
+      accountId: identity.accountId,
+      displayName: identity.displayName,
+      emailAddress: identity.emailAddress
+    };
+  } catch (e) {
+    logIpcFailure('jira:verify-identity', e);
+    return { ok: false, error: 'Jira verifikation fejlede.' };
+  }
+});
+
+// Categories in 'Udvikling Projekter' group that support Jira worklog posting
+const JIRA_WORKLOG_CATEGORIES = new Set([
+  'Udvikling (prioriterede jf. projektoversigten)',
+  'Estimering'
+]);
+
+function postCorporateJiraJson(url: string, headers: Record<string, string>, body: unknown) {
+  return new Promise<{ status: number; ok: boolean; json: () => Promise<unknown> }>((resolve, reject) => {
+    const bodyStr = JSON.stringify(body);
+    const req = https.request(url, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
+      agent: corporateJiraAgent
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on('end', () => {
+        const bodyText = Buffer.concat(chunks).toString('utf8');
+        const status = res.statusCode ?? 500;
+        resolve({ status, ok: status >= 200 && status < 300, json: async () => bodyText ? JSON.parse(bodyText) : {} });
+      });
+    });
+    req.on('error', reject);
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
+  try {
+    const day = String(payload?.day ?? '').trim();
+    if (!day) return { ok: false, error: 'Dag mangler.' };
+
+    const settings = getSettings();
+    const psaKey = String(settings.jira_psa_key ?? '').trim();
+    if (!psaKey) return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+
+    const entries = getDayEntries(day).filter((e: any) => JIRA_WORKLOG_CATEGORIES.has(e.category));
+    if (!entries.length) return { ok: true, results: [] };
+
+    // Aggregate seconds + earliest start per Jira key
+    const aggr = new Map<string, { seconds: number; earliest: string }>();
+    for (const entry of entries as Array<{ day: string; start: string; end: string; description: string; category: string }>) {
+      const m = entry.description?.match(/^([A-Z]+-\d+)\s*-\s*/);
+      if (!m) continue;
+      const key = m[1];
+      const [sh, sm] = entry.start.split(':').map(Number);
+      const [eh, em] = entry.end.split(':').map(Number);
+      const seconds = ((eh * 60 + em) - (sh * 60 + sm)) * 60;
+      if (seconds <= 0) continue;
+      const existing = aggr.get(key);
+      if (existing) {
+        existing.seconds += seconds;
+        if (entry.start < existing.earliest) existing.earliest = entry.start;
+      } else {
+        aggr.set(key, { seconds, earliest: entry.start });
+      }
+    }
+
+    if (!aggr.size) return { ok: true, results: [] };
+
+    const [y, mo, d] = day.split('-').map(Number);
+    const authHeaders = { Accept: 'application/json', Authorization: `Bearer ${psaKey}` };
+    const results: Array<{ key: string; seconds: number; success: boolean; error?: string }> = [];
+
+    for (const [key, { seconds, earliest }] of aggr) {
+      try {
+        const [hh, mm] = earliest.split(':').map(Number);
+        const started = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
+        const pad2 = (n: number) => String(n).padStart(2, '0');
+        const tz = -started.getTimezoneOffset();
+        const tzSign = tz >= 0 ? '+' : '-';
+        const tzH = pad2(Math.floor(Math.abs(tz) / 60));
+        const tzM = pad2(Math.abs(tz) % 60);
+        const startedStr = `${day}T${pad2(hh)}:${pad2(mm)}:00.000${tzSign}${tzH}${tzM}`;
+        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/issue/${key}/worklog`;
+        const res = await postCorporateJiraJson(url, authHeaders, {
+          timeSpentSeconds: seconds,
+          started: startedStr,
+          comment: 'Logged via JFLoggeR'
+        });
+        if (res.ok) {
+          results.push({ key, seconds, success: true });
+        } else {
+          results.push({ key, seconds, success: false, error: `HTTP ${res.status}` });
+        }
+      } catch (e) {
+        results.push({ key, seconds, success: false, error: String(e) });
+      }
+    }
+
+    const allOk = results.every(r => r.success);
+    return { ok: allOk, results };
+  } catch (e) {
+    logIpcFailure('jira:log-worklog', e);
+    return { ok: false, error: 'Jira worklog fejlede.' };
+  }
+});
+
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
 ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
-  const removed = deleteEntry(day, start);
   try {
-    // If the slot is in the past (earlier than now), add back to pending so user can re-log
-    const [y, m, d] = day.split('-').map(Number);
-    const [hh, mm] = start.split(':').map(Number);
-    const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
-    const now = new Date();
-    const isToday = day === toLocalDateYMD(now);
-    const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isWorkdayEnabled(slotDate);
-    if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
-  } catch { /* ignore parse errors */ }
-  return { ok: true, removed };
+    const removed = deleteEntry(day, start);
+    try {
+      // If the slot is in the past (earlier than now), add back to pending so user can re-log
+      const [y, m, d] = day.split('-').map(Number);
+      const [hh, mm] = start.split(':').map(Number);
+      const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+      const now = new Date();
+      const isToday = day === toLocalDateYMD(now);
+      const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isWorkdayEnabled(slotDate);
+      if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
+    } catch { /* ignore parse errors */ }
+    return { ok: true, removed };
+  } catch (e) {
+    logIpcFailure('db:delete-entry', e);
+    return { ok: false, removed: 0, error: String(e) };
+  }
 });
 
 // Generic renderer -> main log sink
@@ -443,35 +790,72 @@ ipcMain.handle('log:write', (_e, entry: { level: string; message: string; meta?:
 });
 
 
-ipcMain.handle('queue:get', () => Array.from(pending).sort());
+ipcMain.handle('queue:get', () => {
+  return Array.from(pending).sort();
+});
 ipcMain.handle(
   'queue:submit',
   (
     _e,
-    payload: { slots: string[]; description: string; category: string }
+    payload: { slots: string[]; description: string; category: string; minimizeWindowAfterSubmit?: boolean }
   ) => {
-    const groupedByDay = new Map<string, any[]>();
-    payload.slots.forEach((k) => {
-      const [day, hm] = k.split('T');
-      const [h, m] = hm.split(':');
-      const slotLen = getSlotMinutes();
-      const endMin = (Number(m) + slotLen) % 60;
-      const endHour = endMin === 0 ? Number(h) + 1 : Number(h);
-      const entry = {
-        day,
-        start: `${h}:${m}`,
-        end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(
-          2,
-          '0'
-        )}`,
-        description: payload.description.trim(),
-        category: payload.category.trim()
-      };
-      if (!groupedByDay.has(day)) groupedByDay.set(day, []);
-      groupedByDay.get(day)!.push(entry);
-      if (pending.has(k)) pending.delete(k);
-    });
-    groupedByDay.forEach((list) => saveEntries(list));
+    try {
+      if (!payload || !Array.isArray(payload.slots)) return { ok: false, error: 'Invalid payload' };
+      const description = String(payload.description ?? '').trim();
+      const category = String(payload.category ?? '').trim();
+      if (!description || !category) return { ok: false, error: 'Description and category are required' };
+
+      const groupedByDay = new Map<string, any[]>();
+      const coverageByDay = new Map<string, Array<{ start: string; end: string }>>();
+      const consumedKeys: string[] = [];
+      for (const k of payload.slots) {
+        if (typeof k !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(k)) {
+          return { ok: false, error: `Invalid slot key: ${String(k)}` };
+        }
+        const [day, hm] = k.split('T');
+        const [h, m] = hm.split(':');
+        const hh = Number(h);
+        const mm = Number(m);
+        if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+          return { ok: false, error: `Invalid slot time: ${k}` };
+        }
+        if (!coverageByDay.has(day)) {
+          coverageByDay.set(day, (getDayEntries(day) as Array<{ start: string; end: string }>).map(e => ({ start: e.start, end: e.end })));
+        }
+        const [y, mo, d] = day.split('-').map(Number);
+        const slotStart = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
+        const dayCoverage = coverageByDay.get(day)!;
+        if (isSlotCoveredByEntries(slotStart, dayCoverage)) {
+          consumedKeys.push(k);
+          continue;
+        }
+        const slotLen = getSlotMinutes();
+        const endTotal = hh * 60 + mm + slotLen;
+        const endMin = endTotal % 60;
+        const endHour = Math.floor(endTotal / 60) % 24;
+        const entry = {
+          day,
+          start: `${h}:${m}`,
+          end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(
+            2,
+            '0'
+          )}`,
+          description,
+          category
+        };
+        if (!groupedByDay.has(day)) groupedByDay.set(day, []);
+        groupedByDay.get(day)!.push(entry);
+        dayCoverage.push({ start: entry.start, end: entry.end });
+        consumedKeys.push(k);
+      }
+      groupedByDay.forEach((list) => saveEntries(list));
+      for (const key of consumedKeys) {
+        if (pending.has(key)) pending.delete(key);
+      }
+    } catch (e) {
+      logIpcFailure('queue:submit', e);
+      return { ok: false, error: String(e) };
+    }
     // Notify renderer that pending slots were consumed so its badge clears quickly (optimistic before loadPending).
     try { win?.webContents.send('queue:updated'); } catch { }
     // Update lastEntryEndTime for today
@@ -488,6 +872,9 @@ ipcMain.handle(
       }
     } catch { }
     updateTrayTooltip();
+    if (payload?.minimizeWindowAfterSubmit) {
+      try { win?.minimize(); } catch { }
+    }
     return { ok: true };
   }
 );
@@ -501,8 +888,8 @@ ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
   n.on('click', () => {
     win?.show();
     win?.focus();
-    win?.webContents.send('prompt:open', { slot: slotKey(slot) });
-    win?.webContents.send('dialog:open-log', { slot: slotKey(slot) });
+    win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'notification' });
+    win?.webContents.send('dialog:open-log', { slot: slotKey(slot), source: 'notification' });
   });
   n.show();
   return { ok: true };
@@ -555,8 +942,8 @@ app.whenReady().then(() => {
             const prev = previousSlotStart(new Date());
             const key = slotKey(prev);
             // Emit both prompt (for selection logic) and a manual dialog open event that bypasses handledPromptSlot gating.
-            win?.webContents.send('prompt:open', { slot: key });
-            win?.webContents.send('dialog:open-log', { slot: key });
+            win?.webContents.send('prompt:open', { slot: key, source: 'tray' });
+            win?.webContents.send('dialog:open-log', { slot: key, source: 'tray' });
           }
         },
         {
