@@ -101,7 +101,10 @@ import {
   getSettings,
   saveSettings,
   deleteEntry,
-  importExternalLines
+  importExternalLines,
+  getJiraLoggedWorklogs,
+  setJiraLoggedWorklogs,
+  clearJiraLoggedWorklogs
 } from './db';
 import { computeStaleSlot } from './stale';
 import { setExternalLogged, getExternalLogged } from './db';
@@ -692,6 +695,26 @@ function postCorporateJiraJson(url: string, headers: Record<string, string>, bod
   });
 }
 
+function deleteCorporateJira(url: string, headers: Record<string, string>) {
+  return new Promise<{ status: number; ok: boolean; json: () => Promise<unknown> }>((resolve, reject) => {
+    const req = https.request(url, {
+      method: 'DELETE',
+      headers,
+      agent: corporateJiraAgent
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on('end', () => {
+        const bodyText = Buffer.concat(chunks).toString('utf8');
+        const status = res.statusCode ?? 500;
+        resolve({ status, ok: status >= 200 && status < 300, json: async () => bodyText ? JSON.parse(bodyText) : {} });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
   try {
     const day = String(payload?.day ?? '').trim();
@@ -727,7 +750,8 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
 
     const [y, mo, d] = day.split('-').map(Number);
     const authHeaders = { Accept: 'application/json', Authorization: `Bearer ${psaKey}` };
-    const results: Array<{ key: string; seconds: number; success: boolean; error?: string }> = [];
+    const results: Array<{ key: string; seconds: number; success: boolean; worklogId?: string; error?: string }> = [];
+    const tracked: Array<{ key: string; worklogId: string; seconds: number; started: string; logged_at: string }> = [];
 
     for (const [key, { seconds, earliest }] of aggr) {
       try {
@@ -746,7 +770,12 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
           comment: 'Logged via JFLoggeR'
         });
         if (res.ok) {
-          results.push({ key, seconds, success: true });
+          const body = await res.json() as { id?: unknown };
+          const worklogId = String(body?.id ?? '').trim();
+          results.push({ key, seconds, success: true, worklogId: worklogId || undefined });
+          if (worklogId) {
+            tracked.push({ key, worklogId, seconds, started: startedStr, logged_at: new Date().toISOString() });
+          }
         } else {
           results.push({ key, seconds, success: false, error: `HTTP ${res.status}` });
         }
@@ -755,11 +784,121 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
       }
     }
 
+    if (tracked.length) setJiraLoggedWorklogs(day, tracked);
+    else clearJiraLoggedWorklogs(day);
+
     const allOk = results.every(r => r.success);
     return { ok: allOk, results };
   } catch (e) {
     logIpcFailure('jira:log-worklog', e);
     return { ok: false, error: 'Jira worklog fejlede.' };
+  }
+});
+
+ipcMain.handle('jira:unset-afstemt', async (_e, payload: { day: string }) => {
+  try {
+    const day = String(payload?.day ?? '').trim();
+    if (!day) return { ok: false, day, exported: true, error: 'Dag mangler.' };
+
+    const tracked = getJiraLoggedWorklogs(day);
+    if (!tracked.length) {
+      const status = setExternalLogged(day, false);
+      return { ok: true, ...status, removed: 0, total: 0, results: [] };
+    }
+
+    const settings = getSettings();
+    const psaKey = String(settings.jira_psa_key ?? '').trim();
+    if (!psaKey) {
+      return {
+        ok: false,
+        day,
+        exported: true,
+        error: 'Kan ikke fjerne Jira worklogs uden Jira PSA key i indstillinger.'
+      };
+    }
+
+    const authHeaders = { Accept: 'application/json', Authorization: `Bearer ${psaKey}` };
+    const results: Array<{ key: string; worklogId: string; success: boolean; error?: string }> = [];
+    const remaining: typeof tracked = [];
+
+    for (const row of tracked) {
+      try {
+        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/issue/${row.key}/worklog/${row.worklogId}?adjustEstimate=leave`;
+        const res = await deleteCorporateJira(url, authHeaders);
+        if (res.ok || res.status === 404) {
+          results.push({ key: row.key, worklogId: row.worklogId, success: true });
+        } else {
+          remaining.push(row);
+          results.push({ key: row.key, worklogId: row.worklogId, success: false, error: `HTTP ${res.status}` });
+        }
+      } catch (e) {
+        remaining.push(row);
+        results.push({ key: row.key, worklogId: row.worklogId, success: false, error: String(e) });
+      }
+    }
+
+    if (remaining.length) {
+      setJiraLoggedWorklogs(day, remaining);
+      return {
+        ok: false,
+        day,
+        exported: true,
+        removed: tracked.length - remaining.length,
+        total: tracked.length,
+        results,
+        error: 'Kunne ikke fjerne alle Jira worklogs. Prøv igen.'
+      };
+    }
+
+    clearJiraLoggedWorklogs(day);
+    const status = setExternalLogged(day, false);
+    return {
+      ok: true,
+      ...status,
+      removed: tracked.length,
+      total: tracked.length,
+      results
+    };
+  } catch (e) {
+    logIpcFailure('jira:unset-afstemt', e);
+    return { ok: false, exported: true, error: 'Kunne ikke fjerne Jira worklogs.' };
+  }
+});
+
+ipcMain.handle('jira:get-logged-worklogs', async (_e, payload: { day: string }) => {
+  try {
+    const day = String(payload?.day ?? '').trim();
+    if (!day) return { ok: false, items: [], error: 'Dag mangler.' };
+
+    const tracked = getJiraLoggedWorklogs(day);
+    if (!tracked.length) return { ok: true, items: [] };
+
+    // Build key -> task summary map from current day entries.
+    const summaryByKey = new Map<string, string>();
+    const dayEntries = getDayEntries(day) as Array<{ description: string }>;
+    for (const entry of dayEntries) {
+      const desc = String(entry?.description ?? '').trim();
+      const m = desc.match(/^([A-Z]+-\d+)\s*-\s*(.+)$/);
+      if (!m) continue;
+      const key = m[1];
+      const summary = String(m[2] ?? '').trim();
+      if (!summary) continue;
+      if (!summaryByKey.has(key)) summaryByKey.set(key, summary);
+    }
+
+    const items = tracked.map((row) => ({
+      key: row.key,
+      worklogId: row.worklogId,
+      seconds: row.seconds,
+      started: row.started,
+      logged_at: row.logged_at,
+      summary: summaryByKey.get(row.key) ?? ''
+    }));
+
+    return { ok: true, items };
+  } catch (e) {
+    logIpcFailure('jira:get-logged-worklogs', e);
+    return { ok: false, items: [], error: 'Kunne ikke hente Jira worklog preview.' };
   }
 });
 

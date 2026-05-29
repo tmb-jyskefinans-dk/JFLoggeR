@@ -12,6 +12,9 @@ exports.getDistinctRecentToday = getDistinctRecentToday;
 exports.deleteEntry = deleteEntry;
 exports.getExternalLogged = getExternalLogged;
 exports.setExternalLogged = setExternalLogged;
+exports.getJiraLoggedWorklogs = getJiraLoggedWorklogs;
+exports.setJiraLoggedWorklogs = setJiraLoggedWorklogs;
+exports.clearJiraLoggedWorklogs = clearJiraLoggedWorklogs;
 exports.ensureDayCreated = ensureDayCreated;
 exports.lastNEntries = lastNEntries;
 exports.importExternalLines = importExternalLines;
@@ -140,6 +143,10 @@ function initDb() {
     }
     if (!db.data.external_logged || typeof db.data.external_logged !== 'object') {
         db.data.external_logged = {};
+        changed = true;
+    }
+    if (!db.data.jira_logged_worklogs || typeof db.data.jira_logged_worklogs !== 'object') {
+        db.data.jira_logged_worklogs = {};
         changed = true;
     }
     if (changed)
@@ -304,6 +311,50 @@ function setExternalLogged(day, val) {
     db.data.external_logged[day] = !!val;
     db.write();
     return { day, exported: !!val };
+}
+function getJiraLoggedWorklogs(day) {
+    ensureDb();
+    db.read();
+    const rows = db.data.jira_logged_worklogs?.[day];
+    if (!Array.isArray(rows))
+        return [];
+    return rows
+        .filter((r) => !!r && typeof r.key === 'string' && typeof r.worklogId === 'string')
+        .map((r) => ({
+        key: String(r.key).trim().toUpperCase(),
+        worklogId: String(r.worklogId).trim(),
+        seconds: Number(r.seconds) || 0,
+        started: typeof r.started === 'string' ? r.started : undefined,
+        logged_at: typeof r.logged_at === 'string' ? r.logged_at : undefined
+    }))
+        .filter((r) => !!r.key && !!r.worklogId);
+}
+function setJiraLoggedWorklogs(day, worklogs) {
+    ensureDb();
+    db.read();
+    if (!db.data.jira_logged_worklogs)
+        db.data.jira_logged_worklogs = {};
+    const normalized = (worklogs ?? [])
+        .filter((r) => !!r && typeof r.key === 'string' && typeof r.worklogId === 'string')
+        .map((r) => ({
+        key: String(r.key).trim().toUpperCase(),
+        worklogId: String(r.worklogId).trim(),
+        seconds: Number(r.seconds) || 0,
+        started: typeof r.started === 'string' ? r.started : undefined,
+        logged_at: typeof r.logged_at === 'string' ? r.logged_at : new Date().toISOString()
+    }))
+        .filter((r) => !!r.key && !!r.worklogId);
+    db.data.jira_logged_worklogs[day] = normalized;
+    db.write();
+    return normalized;
+}
+function clearJiraLoggedWorklogs(day) {
+    ensureDb();
+    db.read();
+    if (!db.data.jira_logged_worklogs)
+        db.data.jira_logged_worklogs = {};
+    delete db.data.jira_logged_worklogs[day];
+    db.write();
 }
 /** Convenience (kept for API parity) */
 function ensureDayCreated(day) { return day; }

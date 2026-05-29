@@ -34,6 +34,9 @@ export class DayViewComponent implements OnDestroy {
   archiveJiraConfirmError = signal('');
   archiveJiraUnsetConfirmOpen = signal(false);
   archiveJiraUnsetConfirmDay = signal('');
+  archiveJiraUnsetConfirmError = signal('');
+  archiveJiraUnsetPreviewLoading = signal(false);
+  archiveJiraUnsetPreviewRows = signal<Array<{ key: string; summary: string; minutes: number; startedLabel: string }>>([]);
 
   archiveJiraKey(description: string): string {
     return String(description ?? '').match(/^([A-Z]+-\d+)/)?.[1] ?? '';
@@ -448,18 +451,37 @@ export class DayViewComponent implements OnDestroy {
   }
 
   private async handleArchiveUnset(day: string) {
-    const warnOnUnset = !!this.ipc.settings()?.jira_log_on_afstem;
-    if (!warnOnUnset) {
-      this.ipc.setDayExported(day, false);
-      return;
-    }
     const hasJiraIntervals = await this.archiveDayHasJiraLinkedIntervals(day);
     if (hasJiraIntervals) {
-      this.archiveJiraUnsetConfirmDay.set(day);
-      this.archiveJiraUnsetConfirmOpen.set(true);
+      await this.openArchiveJiraUnsetConfirm(day);
       return;
     }
     this.ipc.setDayExported(day, false);
+  }
+
+  private async openArchiveJiraUnsetConfirm(day: string) {
+    this.archiveJiraUnsetConfirmDay.set(day);
+    this.archiveJiraUnsetConfirmError.set('');
+    this.archiveJiraUnsetPreviewRows.set([]);
+    this.archiveJiraUnsetPreviewLoading.set(true);
+    this.archiveJiraUnsetConfirmOpen.set(true);
+
+    const resp = await this.ipc.getJiraLoggedWorklogPreview(day);
+    if (!resp.ok) {
+      this.archiveJiraUnsetConfirmError.set(resp.error || 'Kunne ikke hente preview af Jira worklogs.');
+      this.archiveJiraUnsetPreviewLoading.set(false);
+      return;
+    }
+
+    this.archiveJiraUnsetPreviewRows.set(
+      resp.items.map((row) => ({
+        key: row.key,
+        summary: (row.summary ?? '').trim(),
+        minutes: Math.max(0, Math.round((row.seconds || 0) / 60)),
+        startedLabel: this.formatStartedLabel(row.started)
+      }))
+    );
+    this.archiveJiraUnsetPreviewLoading.set(false);
   }
 
   private async archiveDayHasJiraLinkedIntervals(day: string): Promise<boolean> {
@@ -474,13 +496,36 @@ export class DayViewComponent implements OnDestroy {
   closeArchiveJiraUnsetConfirm() {
     this.archiveJiraUnsetConfirmOpen.set(false);
     this.archiveJiraUnsetConfirmDay.set('');
+    this.archiveJiraUnsetConfirmError.set('');
+    this.archiveJiraUnsetPreviewLoading.set(false);
+    this.archiveJiraUnsetPreviewRows.set([]);
   }
 
-  confirmArchiveJiraUnset() {
+  async confirmArchiveJiraUnset() {
     const day = this.archiveJiraUnsetConfirmDay();
     if (!day) return;
-    this.ipc.setDayExported(day, false);
+    this.archiveJiraUnsetConfirmError.set('');
+    const res = await this.ipc.unsetAfstemtWithJiraCleanup(day);
+    if (!res.ok) {
+      this.archiveJiraUnsetConfirmError.set(res.error || 'Kunne ikke fjerne Jira worklogs.');
+      this.snackbar.show(`Afstem blev ikke fjernet for ${day}. ${res.error || 'Jira-oprydning fejlede.'}`);
+      return;
+    }
+    const removed = Number(res.removed ?? 0);
+    const total = Number(res.total ?? removed);
+    if (total > 0) {
+      this.snackbar.show(`Afstem fjernet for ${day}. Slettede ${removed}/${total} Jira worklogs.`);
+    } else {
+      this.snackbar.show(`Afstem fjernet for ${day}. Ingen Jira worklogs skulle slettes.`);
+    }
     this.closeArchiveJiraUnsetConfirm();
+  }
+
+  private formatStartedLabel(started?: string): string {
+    const value = String(started ?? '').trim();
+    if (!value) return '-';
+    const m = value.match(/T(\d{2}:\d{2})/);
+    return m?.[1] ?? '-';
   }
 
   private async openArchiveJiraConfirm(day: string) {

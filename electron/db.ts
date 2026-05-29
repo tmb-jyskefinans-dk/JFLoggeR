@@ -34,11 +34,20 @@ export type Settings = {
   jira_log_on_afstem?: boolean; // automatically post Jira worklogs when marking a day as afstemt
 };
 
+export type JiraLoggedWorklog = {
+  key: string;
+  worklogId: string;
+  seconds: number;
+  started?: string;
+  logged_at?: string;
+};
+
 type Data = {
   entries: Entry[];
   settings: Settings;
   _seq: number;         // simple incremental id if you ever want it
   external_logged?: { [day: string]: boolean }; // per-day external logging status (e.g., pushed to Jira / Excel)
+  jira_logged_worklogs?: { [day: string]: JiraLoggedWorklog[] }; // Jira worklogs created by afstem auto-log flow
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -130,6 +139,7 @@ export function initDb() {
   if (typeof db.data._seq !== 'number') { db.data._seq = 1; changed = true; }
   if (!Array.isArray(db.data.entries)) { db.data.entries = []; changed = true; }
   if (!db.data.external_logged || typeof db.data.external_logged !== 'object') { db.data.external_logged = {}; changed = true; }
+  if (!db.data.jira_logged_worklogs || typeof db.data.jira_logged_worklogs !== 'object') { db.data.jira_logged_worklogs = {}; changed = true; }
   if (changed) db.write();
 }
 
@@ -301,6 +311,50 @@ export function setExternalLogged(day: string, val: boolean) {
   db.data!.external_logged[day] = !!val;
   db.write();
   return { day, exported: !!val };
+}
+
+export function getJiraLoggedWorklogs(day: string): JiraLoggedWorklog[] {
+  ensureDb();
+  db.read();
+  const rows = db.data!.jira_logged_worklogs?.[day];
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((r) => !!r && typeof r.key === 'string' && typeof r.worklogId === 'string')
+    .map((r) => ({
+      key: String(r.key).trim().toUpperCase(),
+      worklogId: String(r.worklogId).trim(),
+      seconds: Number(r.seconds) || 0,
+      started: typeof r.started === 'string' ? r.started : undefined,
+      logged_at: typeof r.logged_at === 'string' ? r.logged_at : undefined
+    }))
+    .filter((r) => !!r.key && !!r.worklogId);
+}
+
+export function setJiraLoggedWorklogs(day: string, worklogs: JiraLoggedWorklog[]) {
+  ensureDb();
+  db.read();
+  if (!db.data!.jira_logged_worklogs) db.data!.jira_logged_worklogs = {};
+  const normalized = (worklogs ?? [])
+    .filter((r) => !!r && typeof r.key === 'string' && typeof r.worklogId === 'string')
+    .map((r) => ({
+      key: String(r.key).trim().toUpperCase(),
+      worklogId: String(r.worklogId).trim(),
+      seconds: Number(r.seconds) || 0,
+      started: typeof r.started === 'string' ? r.started : undefined,
+      logged_at: typeof r.logged_at === 'string' ? r.logged_at : new Date().toISOString()
+    }))
+    .filter((r) => !!r.key && !!r.worklogId);
+  db.data!.jira_logged_worklogs[day] = normalized;
+  db.write();
+  return normalized;
+}
+
+export function clearJiraLoggedWorklogs(day: string) {
+  ensureDb();
+  db.read();
+  if (!db.data!.jira_logged_worklogs) db.data!.jira_logged_worklogs = {};
+  delete db.data!.jira_logged_worklogs[day];
+  db.write();
 }
 
 /** Convenience (kept for API parity) */

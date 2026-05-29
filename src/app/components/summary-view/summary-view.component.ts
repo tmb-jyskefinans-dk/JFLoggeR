@@ -35,6 +35,9 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   jiraLogging = signal(false);
   jiraResult = signal<JiraWorklogResult | null>(null);
   jiraUnsetConfirming = signal(false);
+  jiraUnsetError = signal('');
+  jiraUnsetPreviewLoading = signal(false);
+  jiraUnsetPreviewRows = signal<Array<{ key: string; summary: string; minutes: number; startedLabel: string }>>([]);
 
   rows = computed<SummaryRow[]>(() => this.ipc.summary());
   totalSlots = computed(() => this.rows().reduce((a, r) => a + r.slots, 0));
@@ -200,9 +203,8 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
     const day = this.day();
     if (!day) return;
     const checked = (ev.target as HTMLInputElement).checked;
-    const warnOnUnset = !!this.ipc.settings()?.jira_log_on_afstem;
-    if (!checked && warnOnUnset && this.jiraWorklogRows().length > 0) {
-      this.jiraUnsetConfirming.set(true);
+    if (!checked && this.jiraWorklogRows().length > 0) {
+      void this.openJiraUnsetConfirm();
       return;
     }
     if (checked && shouldJiraAutoLogOnAfstem(this.ipc.settings())) {
@@ -219,13 +221,62 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
 
   cancelJiraUnsetConfirm() {
     this.jiraUnsetConfirming.set(false);
+    this.jiraUnsetError.set('');
+    this.jiraUnsetPreviewLoading.set(false);
+    this.jiraUnsetPreviewRows.set([]);
   }
 
-  confirmJiraUnset() {
+  async confirmJiraUnset() {
     const day = this.day();
     if (!day) return;
-    this.ipc.setDayExported(day, false);
+    this.jiraUnsetError.set('');
+    const res = await this.ipc.unsetAfstemtWithJiraCleanup(day);
+    if (!res.ok) {
+      this.jiraUnsetError.set(res.error || 'Kunne ikke fjerne Jira worklogs.');
+      this.snackbar.show(`Afstem blev ikke fjernet for ${day}. ${res.error || 'Jira-oprydning fejlede.'}`);
+      return;
+    }
     this.jiraUnsetConfirming.set(false);
+    const removed = Number(res.removed ?? 0);
+    const total = Number(res.total ?? removed);
+    if (total > 0) {
+      this.snackbar.show(`Afstem fjernet for ${day}. Slettede ${removed}/${total} Jira worklogs.`);
+    } else {
+      this.snackbar.show(`Afstem fjernet for ${day}. Ingen Jira worklogs skulle slettes.`);
+    }
+  }
+
+  private async openJiraUnsetConfirm() {
+    const day = this.day();
+    if (!day) return;
+    this.jiraUnsetError.set('');
+    this.jiraUnsetPreviewRows.set([]);
+    this.jiraUnsetPreviewLoading.set(true);
+    this.jiraUnsetConfirming.set(true);
+
+    const resp = await this.ipc.getJiraLoggedWorklogPreview(day);
+    if (!resp.ok) {
+      this.jiraUnsetError.set(resp.error || 'Kunne ikke hente preview af Jira worklogs.');
+      this.jiraUnsetPreviewLoading.set(false);
+      return;
+    }
+
+    this.jiraUnsetPreviewRows.set(
+      resp.items.map((row) => ({
+        key: row.key,
+        summary: (row.summary ?? '').trim(),
+        minutes: Math.max(0, Math.round((row.seconds || 0) / 60)),
+        startedLabel: this.formatStartedLabel(row.started)
+      }))
+    );
+    this.jiraUnsetPreviewLoading.set(false);
+  }
+
+  private formatStartedLabel(started?: string): string {
+    const value = String(started ?? '').trim();
+    if (!value) return '-';
+    const m = value.match(/T(\d{2}:\d{2})/);
+    return m?.[1] ?? '-';
   }
 
   cancelJiraConfirm() {

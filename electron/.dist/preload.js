@@ -26,6 +26,8 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     signOutMicrosoft: () => electron_1.ipcRenderer.invoke('auth:signout'),
     jiraSearchIssues: (term) => electron_1.ipcRenderer.invoke('jira:search-issues', { term }),
     jiraLogWorklog: (day) => electron_1.ipcRenderer.invoke('jira:log-worklog', { day }),
+    jiraGetLoggedWorklogs: (day) => electron_1.ipcRenderer.invoke('jira:get-logged-worklogs', { day }),
+    jiraUnsetAfstemt: (day) => electron_1.ipcRenderer.invoke('jira:unset-afstemt', { day }),
     jiraVerifyIdentity: (payload) => electron_1.ipcRenderer.invoke('jira:verify-identity', payload ?? {}),
     // Events from main (notifications clicked)
     onPrompt: (cb) => {

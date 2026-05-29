@@ -41,6 +41,24 @@ export interface JiraWorklogResult {
   error?: string;
 }
 
+export interface JiraUnsetAfstemtResult {
+  ok: boolean;
+  day?: string;
+  exported?: boolean;
+  removed?: number;
+  total?: number;
+  error?: string;
+}
+
+export interface JiraLoggedWorklogPreview {
+  key: string;
+  worklogId: string;
+  summary?: string;
+  seconds: number;
+  started?: string;
+  logged_at?: string;
+}
+
 export interface JiraIdentityResult {
   ok: boolean;
   accountId?: string;
@@ -80,6 +98,8 @@ declare global {
       signOutMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
       jiraSearchIssues?(term: string): Promise<{ ok: boolean; items?: JiraIssueSuggestion[]; error?: string }>;
       jiraLogWorklog?(day: string): Promise<JiraWorklogResult>;
+      jiraGetLoggedWorklogs?(day: string): Promise<{ ok: boolean; items?: JiraLoggedWorklogPreview[]; error?: string }>;
+      jiraUnsetAfstemt?(day: string): Promise<JiraUnsetAfstemtResult>;
       jiraVerifyIdentity?(payload?: { psaKey?: string }): Promise<JiraIdentityResult>;
     };
   }
@@ -386,6 +406,57 @@ export class IpcService {
       .catch((err) => {
         console.error('[ipc] verifyJiraIdentity failed', err);
         return { ok: false, error: 'Jira verifikation fejlede.' };
+      });
+  }
+
+  unsetAfstemtWithJiraCleanup(day: string): Promise<JiraUnsetAfstemtResult> {
+    if (!window.workApi.jiraUnsetAfstemt) {
+      return Promise.resolve({ ok: false, day, exported: true, error: 'Jira afstem-oprydning er ikke tilgængelig.' });
+    }
+    return window.workApi.jiraUnsetAfstemt(day)
+      .then((resp) => {
+        const ok = !!resp?.ok;
+        const exported = !!resp?.exported;
+        const targetDay = String(resp?.day ?? day);
+        const m = new Map(this.dayExported());
+        m.set(targetDay, exported);
+        this.dayExported.set(m);
+        this.refreshDays();
+        return {
+          ok,
+          day: targetDay,
+          exported,
+          removed: Number(resp?.removed ?? 0),
+          total: Number(resp?.total ?? 0),
+          error: resp?.error
+        };
+      })
+      .catch((err) => {
+        console.error('[ipc] unsetAfstemtWithJiraCleanup failed', err);
+        return { ok: false, day, exported: true, error: 'Kunne ikke fjerne Jira worklogs.' };
+      });
+  }
+
+  getJiraLoggedWorklogPreview(day: string): Promise<{ ok: boolean; items: JiraLoggedWorklogPreview[]; error?: string }> {
+    if (!window.workApi.jiraGetLoggedWorklogs) {
+      return Promise.resolve({ ok: false, items: [], error: 'Jira worklog preview er ikke tilgængelig.' });
+    }
+    return window.workApi.jiraGetLoggedWorklogs(day)
+      .then((resp) => ({
+        ok: !!resp?.ok,
+        items: (resp?.items ?? []).map((row) => ({
+          key: String(row?.key ?? '').trim().toUpperCase(),
+          worklogId: String(row?.worklogId ?? '').trim(),
+          summary: typeof row?.summary === 'string' ? row.summary : '',
+          seconds: Number(row?.seconds ?? 0),
+          started: typeof row?.started === 'string' ? row.started : undefined,
+          logged_at: typeof row?.logged_at === 'string' ? row.logged_at : undefined
+        })),
+        error: resp?.error
+      }))
+      .catch((err) => {
+        console.error('[ipc] getJiraLoggedWorklogPreview failed', err);
+        return { ok: false, items: [] as JiraLoggedWorklogPreview[], error: 'Kunne ikke hente Jira worklog preview.' };
       });
   }
 }

@@ -266,7 +266,23 @@
     <div class="w-full max-w-lg rounded-xl border border-slate-200 dark:border-slate-600 shadow-xl bg-white dark:bg-slate-800 p-6 flex flex-col gap-4">
       <h3 id="archiveJiraUnsetConfirmTitle" class="text-lg font-semibold text-slate-900 dark:text-slate-100">Fjern Afstemt markering?</h3>
       <p class="text-sm text-slate-600 dark:text-slate-300">Denne dag har Jira-loggede intervaller.</p>
-      <p class="text-sm text-amber-700 dark:text-amber-300">Hvis du slår <strong>Afstemt</strong> fra, bliver allerede logget tid i Jira <strong>ikke</strong> fjernet automatisk.</p>
+      <p class="text-sm text-amber-700 dark:text-amber-300">Hvis du slår <strong>Afstemt</strong> fra, forsøger appen at fjerne tidligere oprettede Jira worklogs for dagen for at undgå dubletter ved næste afstemning.</p>
+      @if(archiveJiraUnsetPreviewLoading()) {
+        <p class="text-sm text-slate-500 dark:text-slate-400">Henter Jira worklogs, der fjernes...</p>
+      } @else if (archiveJiraUnsetPreviewRows().length) {
+        <ul class="space-y-1 max-h-52 overflow-auto text-sm" aria-label="Jira worklogs der fjernes">
+          @for(row of archiveJiraUnsetPreviewRows(); track (row.key + '|' + row.startedLabel + '|' + row.minutes)) {
+            <li class="flex items-center justify-between gap-2 rounded-md bg-slate-50 dark:bg-slate-700/40 px-3 py-2">
+              <span class="font-mono text-indigo-700 dark:text-indigo-300 text-xs">{{row.key}}</span>
+              <span class="flex-1 truncate text-slate-700 dark:text-slate-200 text-xs">{{row.summary || 'Ukendt task'}}</span>
+              <span class="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{{row.startedLabel}} • {{row.minutes}} min</span>
+            </li>
+          }
+        </ul>
+      }
+      @if(archiveJiraUnsetConfirmError()) {
+        <p class="text-xs text-rose-600 dark:text-rose-400">{{archiveJiraUnsetConfirmError()}}</p>
+      }
       <div class="flex gap-3 justify-end mt-2">
         <button type="button" (click)="closeArchiveJiraUnsetConfirm()"
           class="inline-flex items-center justify-center rounded-md text-sm font-medium px-4 h-9 border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition">
