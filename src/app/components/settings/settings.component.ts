@@ -1,4 +1,4 @@
-import { Component, inject, ChangeDetectionStrategy, effect, signal, computed } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, effect, signal, computed, OnDestroy } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
@@ -9,6 +9,9 @@ import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
   selector: 'settings-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [ReactiveFormsModule, DecimalPipe],
+  host: {
+    '(window:beforeunload)': 'onWindowBeforeUnload($event)'
+  },
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss']
 })
@@ -63,6 +66,10 @@ export class SettingsComponent {
   private autoJiraVerifyAttempted = false;
   saveToast = signal<{ message: string; kind: 'success' | 'error' } | null>(null);
   private saveToastTimer: ReturnType<typeof setTimeout> | null = null;
+  showUnsavedDialog = signal<boolean>(false);
+  leaveDialogBusy = signal<boolean>(false);
+  private pendingLeaveResolver: ((allow: boolean) => void) | null = null;
+  private pendingLeavePromise: Promise<boolean> | null = null;
 
   // Import feature signals
   importText = signal<string>('');
@@ -164,7 +171,7 @@ export class SettingsComponent {
     });
   }
 
-  async save() {
+  async save(): Promise<boolean> {
     const raw = this.settingsForm.getRawValue();
     const weekdays_mask = this.weekdayControlNames.reduce((acc, name, i) => raw[name] ? acc | (1 << i) : acc, 0);
     const payload = {
@@ -194,9 +201,11 @@ export class SettingsComponent {
         this.jiraVerifyResult.set(null);
       }
       this.showSaveToast('Indstillinger gemt.', 'success');
+      return true;
     } catch {
       // Keep baseline unchanged on failure so user can retry save.
       this.showSaveToast('Gemning fejlede. Prøv igen.', 'error');
+      return false;
     }
   }
 
@@ -284,5 +293,60 @@ export class SettingsComponent {
     } finally {
       this.jiraVerifyBusy.set(false);
     }
+  }
+
+  requestLeaveConfirmation(): boolean | Promise<boolean> {
+    if (!this.changed()) return true;
+    if (this.pendingLeavePromise) return this.pendingLeavePromise;
+
+    this.showUnsavedDialog.set(true);
+    this.pendingLeavePromise = new Promise<boolean>((resolve) => {
+      this.pendingLeaveResolver = resolve;
+    });
+    return this.pendingLeavePromise;
+  }
+
+  cancelLeave() {
+    this.resolvePendingLeave(false);
+  }
+
+  discardChangesAndLeave() {
+    this.resolvePendingLeave(true);
+  }
+
+  async saveChangesAndLeave() {
+    if (this.leaveDialogBusy()) return;
+    this.leaveDialogBusy.set(true);
+    const ok = await this.save();
+    this.leaveDialogBusy.set(false);
+    if (ok) {
+      this.resolvePendingLeave(true);
+    }
+  }
+
+  ngOnDestroy() {
+    if (this.saveToastTimer) {
+      clearTimeout(this.saveToastTimer);
+      this.saveToastTimer = null;
+    }
+    if (this.pendingLeaveResolver) {
+      this.pendingLeaveResolver(false);
+      this.pendingLeaveResolver = null;
+      this.pendingLeavePromise = null;
+    }
+  }
+
+  private resolvePendingLeave(allow: boolean) {
+    this.showUnsavedDialog.set(false);
+    const resolver = this.pendingLeaveResolver;
+    this.pendingLeaveResolver = null;
+    this.pendingLeavePromise = null;
+    resolver?.(allow);
+  }
+
+  onWindowBeforeUnload(event: BeforeUnloadEvent) {
+    if (!this.changed()) return;
+    event.preventDefault();
+    event.returnValue = '';
   }
 }

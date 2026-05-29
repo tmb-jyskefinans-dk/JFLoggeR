@@ -40,9 +40,15 @@
                     ? 'group relative inline-flex items-start rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition border-indigo-600 bg-indigo-600 text-white dark:bg-indigo-500 dark:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400'
                     : 'group relative inline-flex items-start rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition border-slate-300 bg-white text-slate-700 hover:border-indigo-400 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400'">
             <span class="flex flex-col leading-tight text-left">
-              <span class="text-[10px] font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-300">{{slot.weekday}}</span>
-              <span class="text-[10px] font-medium text-slate-500 dark:text-slate-400 tracking-wide">{{slot.day}}</span>
-              <span class="text-sm font-semibold text-slate-900 dark:text-slate-100">{{slot.time}}</span>
+              <span [class]="selectedSlots().includes(slot.key)
+                ? 'text-[10px] font-semibold uppercase tracking-wide text-indigo-100'
+                : 'text-[10px] font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-300'">{{slot.weekday}}</span>
+              <span [class]="selectedSlots().includes(slot.key)
+                ? 'text-[10px] font-medium tracking-wide text-indigo-100/90'
+                : 'text-[10px] font-medium text-slate-500 dark:text-slate-400 tracking-wide'">{{slot.day}}</span>
+              <span [class]="selectedSlots().includes(slot.key)
+                ? 'text-sm font-semibold text-white'
+                : 'text-sm font-semibold text-slate-900 dark:text-slate-100'">{{slot.time}}</span>
             </span>
             <span class="ml-2 w-4 h-4 flex items-center justify-center">
               <svg viewBox="0 0 24 24" aria-hidden="true" class="w-4 h-4 transition-opacity duration-150" [class]="selectedSlots().includes(slot.key) ? 'opacity-100 text-white dark:text-white' : 'opacity-0'">

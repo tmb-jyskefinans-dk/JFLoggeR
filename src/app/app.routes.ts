@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { DayViewComponent } from './components/day-view/day-view.component';
 import { SummaryViewComponent } from './components/summary-view/summary-view.component';
 import { SettingsComponent } from './components/settings/settings.component';
+import { settingsUnsavedChangesGuard } from './components/settings/settings-unsaved-changes.guard';
 
 
 
@@ -10,5 +11,5 @@ export const routes: Routes = [
   { path: 'today', component: DayViewComponent },
   { path: 'day/:ymd', component: DayViewComponent },
   { path: 'summary/:ymd', component: SummaryViewComponent },
-  { path: 'settings', component: SettingsComponent }
+  { path: 'settings', component: SettingsComponent, canDeactivate: [settingsUnsavedChangesGuard] }
 ];

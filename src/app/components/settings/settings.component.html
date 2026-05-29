@@ -210,6 +210,30 @@
   }
 </div>
 
+@if(showUnsavedDialog()) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm" (keydown.escape)="cancelLeave()" role="presentation">
+    <section role="dialog" aria-modal="true" aria-labelledby="unsavedTitle"
+      class="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-600 bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 shadow-xl p-5 text-slate-700 dark:text-slate-200">
+      <h3 id="unsavedTitle" class="text-base font-semibold text-slate-900 dark:text-slate-100">Du har ugemte ændringer</h3>
+      <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">Vil du gemme ændringerne, kassere dem, eller blive på siden?</p>
+      <div class="mt-4 flex flex-wrap justify-end gap-2">
+        <button type="button" (click)="cancelLeave()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium px-3 h-9 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">
+          Bliv
+        </button>
+        <button type="button" (click)="discardChangesAndLeave()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium px-3 h-9 bg-white text-rose-700 border border-rose-300 hover:bg-rose-50 active:bg-rose-100 dark:bg-slate-700 dark:text-rose-300 dark:border-rose-700 dark:hover:bg-rose-900/30">
+          Kasser
+        </button>
+        <button type="button" (click)="saveChangesAndLeave()" [disabled]="leaveDialogBusy()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-9 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">
+          {{ leaveDialogBusy() ? 'Gemmer...' : 'Gem og fortsæt' }}
+        </button>
+      </div>
+    </section>
+  </div>
+}
+
 <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 shadow-sm p-6 max-w-4xl mx-auto mt-8 text-slate-700 dark:text-slate-200">
   <h3 class="text-lg font-semibold tracking-tight mb-2 text-slate-900 dark:text-slate-100">Importér eksterne registreringer</h3>
   <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Indsæt én JSON pr. linje med felterne <code>entry_id, task, segment_start, segment_end, minutes</code>. Intervaller udvides til hele slots ({{ipc.settings()?.slot_minutes}} min). Delvise rester ignoreres.</p>
