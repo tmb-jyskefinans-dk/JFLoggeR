@@ -80,7 +80,17 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   private jiraAutocompleteCategories = new Set(
     CATEGORY_GROUPS.find((g) => g.label === 'Udvikling Projekter')?.items ?? []
   );
-  jiraAutocompleteEnabled = computed(() => this.jiraAutocompleteCategories.has(this.category().trim()));
+  selectedJiraIssueKey = signal('');
+  jiraAutocompleteEnabled = computed(() => this.category().trim() !== 'Andet');
+  jiraSelectionRequired = computed(() => this.jiraAutocompleteCategories.has(this.category().trim()));
+  hasValidSelectedJiraIssue = computed(() => {
+    if (!this.jiraSelectionRequired()) return true;
+    const key = this.selectedJiraIssueKey().trim();
+    if (!key) return false;
+    const desc = this.description().trim();
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${escapedKey}\\s-\\s.+`).test(desc);
+  });
   unmatchedCategory(): boolean {
     const c = this.category().trim();
     if (!c) return false;
@@ -199,6 +209,8 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
       // Clear special field when leaving 'Andet'
       if (this.category() !== 'Andet') this.andetDescription.set('');
     }
+    const jiraMatch = (this.description().trim()).match(/^([A-Z]+-\d+)\s-\s.+/);
+    this.selectedJiraIssueKey.set(jiraMatch ? jiraMatch[1] : '');
     this.refreshJiraAutocomplete(true);
   }
   async submit() {
@@ -213,6 +225,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     const otherDescription = this.andetDescription().trim();
     let finalDescription = category === 'Andet' ? otherDescription : baseDescription;
     if (!slots.length || !category || !finalDescription) return;
+    if (this.jiraSelectionRequired() && !this.hasValidSelectedJiraIssue()) return;
     const minimizeAfterSubmit = this.openedFromNotification() && !!this.ipc.settings()?.minimize_after_notification_submit;
     await this.ipc.submitPending(slots, finalDescription, category, { minimizeWindowAfterSubmit: minimizeAfterSubmit });
     // Derive affected day from first slot and trigger reload of day & summary signals
@@ -244,6 +257,10 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     const otherDescription = this.andetDescription().trim();
     const finalDescription = category === 'Andet' ? otherDescription : baseDescription;
     if (!category || !finalDescription) { this.manualError.set('Beskrivelse og kategori er påkrævet'); return; }
+    if (this.jiraSelectionRequired() && !this.hasValidSelectedJiraIssue()) {
+      this.manualError.set('Vælg et gyldigt Jira issue fra forslag for denne kategori.');
+      return;
+    }
     const slotMinutes = this.ipc.settings()?.slot_minutes ?? 15;
     const slots: string[] = [];
     for (let m = Math.floor(startMin / slotMinutes) * slotMinutes; m < endMin; m += slotMinutes) {
@@ -278,11 +295,18 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     const next = preserveCategoryDescriptions(nextCategory, this.description(), this.andetDescription());
     this.description.set(next.description);
     this.andetDescription.set(next.andetDescription);
+    if (nextCategory.trim() === 'Andet') {
+      this.selectedJiraIssueKey.set('');
+    }
     this.refreshJiraAutocomplete(true);
   }
 
   onDescriptionInput(nextValue: string) {
     this.description.set(nextValue);
+    const jiraMatch = nextValue.trim().match(/^([A-Z]+-\d+)\s-\s.+/);
+    if (!jiraMatch || jiraMatch[1] !== this.selectedJiraIssueKey()) {
+      this.selectedJiraIssueKey.set('');
+    }
     this.refreshJiraAutocomplete();
   }
 
@@ -323,6 +347,8 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
 
   selectJiraSuggestion(item: JiraIssueSuggestion) {
     if (!item) return;
+    this.selectedJiraIssueKey.set(item.key);
+    this.andetDescription.set('');
     this.description.set(`${item.key} - ${item.summary}`);
     this.clearJiraSuggestions();
   }

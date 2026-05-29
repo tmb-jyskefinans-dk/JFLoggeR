@@ -105,20 +105,23 @@ describe('LogDialogComponent', () => {
     expect(component.selectedSlots()).toEqual(['2026-05-19T12:30']);
   }));
 
-  it('searches Jira only for Udvikling Projekter categories', fakeAsync(() => {
+  it('searches Jira for non-Andet categories', fakeAsync(() => {
     component.category.set('Projekt');
-    component.onDescriptionInput('TEAM');
-    tick(350);
-    expect((ipcMock as any).searchJiraIssues).not.toHaveBeenCalled();
-
-    component.category.set('Udvikling (prioriterede jf. projektoversigten)');
     component.onDescriptionInput('TEAM');
     tick(350);
     flushMicrotasks();
     expect((ipcMock as any).searchJiraIssues).toHaveBeenCalled();
+
+    (ipcMock as any).searchJiraIssues.calls.reset();
+    component.category.set('Andet');
+    component.onDescriptionInput('TEAM');
+    tick(350);
+    flushMicrotasks();
+    expect((ipcMock as any).searchJiraIssues).not.toHaveBeenCalled();
   }));
 
-  it('inserts KEY - Summary when Jira suggestion is selected', () => {
+  it('inserts KEY - Summary and preserves selected category when Jira suggestion is selected', () => {
+    component.category.set('Projekt');
     component.selectJiraSuggestion({
       key: 'TEAMJYFWEB-13081',
       summary: 'Supporter nye statusopdateringer fra Fibos',
@@ -126,6 +129,25 @@ describe('LogDialogComponent', () => {
     });
 
     expect(component.description()).toBe('TEAMJYFWEB-13081 - Supporter nye statusopdateringer fra Fibos');
+    expect(component.category()).toBe('Projekt');
+  });
+
+  it('requires selected Jira issue for Udvikling Projekter categories', async () => {
+    component.category.set('Udvikling (prioriterede jf. projektoversigten)');
+    component.description.set('Arbejder med feature uden valgt issue');
+    component.selectedSlots.set(['2026-05-19T12:00']);
+
+    await component.submit();
+    expect((ipcMock as any).submitPending).not.toHaveBeenCalled();
+
+    component.selectJiraSuggestion({
+      key: 'TEAMJYFWEB-13081',
+      summary: 'Supporter nye statusopdateringer fra Fibos',
+      iconUrl: 'https://jira/icon.png'
+    });
+
+    await component.submit();
+    expect((ipcMock as any).submitPending).toHaveBeenCalled();
   });
 
   it('reopens Jira autocomplete on description focus when value already exists', fakeAsync(() => {
