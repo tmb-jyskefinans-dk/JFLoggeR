@@ -150,6 +150,30 @@ describe('LogDialogComponent', () => {
     expect((ipcMock as any).submitPending).toHaveBeenCalled();
   });
 
+  it('accepts adjacent-slot prefill with Jira key for Udvikling Projekter without manual re-selection', fakeAsync(() => {
+    (window as any).workApi.getDayEntries = jasmine.createSpy('getDayEntries').and.resolveTo([
+      {
+        day: '2026-05-19',
+        start: '11:45',
+        category: 'Udvikling (prioriterede jf. projektoversigten)',
+        description: 'TEAMJYFWEB-13081 - Supporter nye statusopdateringer fra Fibos'
+      }
+    ]);
+    pendingSlots.set(['2026-05-19T12:00']);
+    lastPromptSlot.set('2026-05-19T12:00');
+
+    fixture.detectChanges();
+    flushMicrotasks();
+
+    expect(component.category()).toBe('Udvikling (prioriterede jf. projektoversigten)');
+    expect(component.description()).toBe('TEAMJYFWEB-13081 - Supporter nye statusopdateringer fra Fibos');
+    expect(component.hasValidSelectedJiraIssue()).toBeTrue();
+
+    void component.submit();
+    flushMicrotasks();
+    expect((ipcMock as any).submitPending).toHaveBeenCalled();
+  }));
+
   it('reopens Jira autocomplete on description focus when value already exists', fakeAsync(() => {
     component.category.set('Udvikling (prioriterede jf. projektoversigten)');
     component.description.set('TEAMJYFWEB-13081 - Supporter nye statusopdateringer fra Fibos');

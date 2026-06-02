@@ -440,9 +440,12 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
       if (previousEntry.category === 'Andet') {
         this.description.set('');
         this.andetDescription.set(previousEntry.description);
+        this.selectedJiraIssueKey.set('');
       } else {
         this.description.set(previousEntry.description);
         this.andetDescription.set('');
+        const jiraMatch = previousEntry.description.trim().match(/^([A-Z]+-\d+)\s-\s.+/);
+        this.selectedJiraIssueKey.set(jiraMatch ? jiraMatch[1] : '');
       }
     }).catch(() => {
       // Leave the dialog blank if the previous slot cannot be resolved.
