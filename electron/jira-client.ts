@@ -36,7 +36,8 @@ export function normalizeJiraConnection(raw: unknown): JiraConnection | null {
     name: String(c['name'] ?? '').trim() || (type === 'cloud' ? 'Jira Cloud' : 'Jira On-Premise'),
     type,
     base_url: normalizeJiraBaseUrl(c['base_url']),
-    project_key: String(c['project_key'] ?? '').trim().toUpperCase(),
+    // Project keys are interpolated into JQL, so only allow Jira's key alphabet.
+    project_key: String(c['project_key'] ?? '').toUpperCase().replace(/[^A-Z0-9_]/g, ''),
     token: String(c['token'] ?? '').trim(),
     email: type === 'cloud' ? String(c['email'] ?? '').trim() : ''
   };
@@ -64,7 +65,7 @@ export function normalizeActiveJiraConnectionId(connections: JiraConnection[], a
 /** Converts the pre-multi-connection settings (single on-prem PSA key) to a connection list. */
 export function migrateLegacyJiraSettings(legacy: { jira_psa_key?: unknown; jira_project_key?: unknown }): JiraConnection[] {
   const token = String(legacy.jira_psa_key ?? '').trim();
-  const projectKey = String(legacy.jira_project_key ?? '').trim().toUpperCase();
+  const projectKey = String(legacy.jira_project_key ?? '').toUpperCase().replace(/[^A-Z0-9_]/g, '');
   if (!token && !projectKey) return [];
   return [{
     id: LEGACY_ONPREM_CONNECTION_ID,
@@ -89,6 +90,13 @@ export function jiraConnectionMissingConfig(c: JiraConnection | undefined): stri
   if (!c.token) return c.type === 'cloud' ? `Jira API token mangler for "${c.name}".` : `Jira PSA key mangler for "${c.name}".`;
   if (c.type === 'cloud' && !c.email) return `Email mangler for Jira Cloud-forbindelsen "${c.name}".`;
   return null;
+}
+
+/** Escapes a value for use inside a double-quoted JQL string literal. */
+export function escapeJqlString(value: string): string {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/[\\"]/g, '\\$&');
 }
 
 export function jiraApiBase(c: JiraConnection): string {

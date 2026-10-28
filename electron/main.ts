@@ -1,8 +1,8 @@
 // electron/main.ts
-import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor, screen, net, session, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import https from 'node:https';
+import { pathToFileURL } from 'node:url';
 
 // Lightweight structured logging to file + console. Rotates by day (new file per day).
 function ensureLogDir(): string {
@@ -27,46 +27,69 @@ function writeLog(level: string, message: string, meta?: any) {
   } catch (e) { /* last-chance; avoid throwing in logger */ }
 }
 
-// On-prem Jira uses a corporate CA that Node does not trust; Cloud uses normal TLS verification.
-const corporateJiraAgent = new https.Agent({ rejectUnauthorized: false });
-
 type JiraHttpResponse = { status: number; ok: boolean; json: () => Promise<unknown> };
 
-function jiraRequest(
+// Chromium's network stack verifies TLS against the Windows certificate store (where the corporate CA lives)
+// and honours the system proxy, so no certificate checks need to be disabled for on-prem Jira.
+async function jiraRequest(
   connection: JiraConnection,
   method: 'GET' | 'POST' | 'DELETE',
   url: string,
   body?: unknown
-) {
-  return new Promise<JiraHttpResponse>((resolve, reject) => {
-    const bodyStr = body === undefined ? undefined : JSON.stringify(body);
-    const headers: Record<string, string | number> = { ...jiraAuthHeaders(connection) };
-    if (bodyStr !== undefined) {
-      headers['Content-Type'] = 'application/json';
-      headers['Content-Length'] = Buffer.byteLength(bodyStr);
-    }
-    const req = https.request(url, {
-      method,
-      headers,
-      agent: connection.type === 'server' ? corporateJiraAgent : undefined
-    }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      res.on('end', () => {
-        const bodyText = Buffer.concat(chunks).toString('utf8');
-        const status = res.statusCode ?? 500;
-        resolve({
-          status,
-          ok: status >= 200 && status < 300,
-          json: async () => bodyText ? JSON.parse(bodyText) : {}
-        });
-      });
-    });
-    req.on('error', reject);
-    if (bodyStr !== undefined) req.write(bodyStr);
-    req.end();
+): Promise<JiraHttpResponse> {
+  const headers: Record<string, string> = { ...jiraAuthHeaders(connection) };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await net.fetch(url, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    // Never follow redirects with the Authorization header or use ambient browser cookies.
+    redirect: 'error',
+    credentials: 'omit'
   });
+  const bodyText = await res.text();
+  return {
+    status: res.status,
+    ok: res.ok,
+    json: async () => bodyText ? JSON.parse(bodyText) : {}
+  };
 }
+
+const APP_DIST_DIR = path.join(__dirname, '../../dist/work-logger/browser');
+
+/** Dev server is only honoured for unpackaged builds so an env var cannot point the installed app at remote content. */
+function devServerUrl(): string | null {
+  const url = process.env['VITE_DEV_SERVER_URL'];
+  return !app.isPackaged && url ? url : null;
+}
+
+function isAppUrl(url: string): boolean {
+  if (!url) return false;
+  const dev = devServerUrl();
+  if (dev && url.startsWith(dev)) return true;
+  return url.startsWith(pathToFileURL(APP_DIST_DIR).href);
+}
+
+// Every IPC call must come from the app's own page; blocks any injected or navigated-to content from using the bridge.
+const registerIpcHandler = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel: string, listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) =>
+  registerIpcHandler(channel, (event, ...args) => {
+    if (!isAppUrl(event.senderFrame?.url ?? '')) {
+      writeLog('warn', 'Blocked IPC from untrusted sender', { channel, url: event.senderFrame?.url });
+      throw new Error('Untrusted IPC sender');
+    }
+    return listener(event, ...args);
+  });
+
+app.on('web-contents-created', (_e, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const blockForeignNavigation = (event: Electron.Event, url: string) => {
+    if (!isAppUrl(url)) event.preventDefault();
+  };
+  contents.on('will-navigate', blockForeignNavigation);
+  contents.on('will-redirect', blockForeignNavigation);
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+});
 
 let fatalShutdownInProgress = false;
 
@@ -166,6 +189,7 @@ import {
   buildJiraWorklogBody,
   buildJiraWorklogUrl,
   describeJiraHttpError,
+  escapeJqlString,
   jiraAuthHeaders,
   jiraConnectionMissingConfig,
   jiraUserIdFromMyself,
@@ -451,6 +475,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
       // Ensure timers (notifications ticker, stale checks) continue firing with accurate cadence
       // even when window is unfocused or minimized. This prevents delayed queue updates.
       backgroundThrottling: false
@@ -460,13 +486,13 @@ function createWindow() {
   // Update to new branded AppUserModelID (must match package.json build.appId for notifications & taskbar grouping)
   app.setAppUserModelId('com.jyskefinans.jfloggr');
 
-  const devUrl = process.env['VITE_DEV_SERVER_URL'];
+  const devUrl = devServerUrl();
   if (devUrl) {
     win.loadURL(devUrl);
     // DevTools draws a size overlay on every island resize, so only open it on request.
     if (process.env['ELECTRON_DEVTOOLS'] === '1') win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    win.loadFile(path.join(__dirname, '../../dist/work-logger/browser/index.html'));
+    win.loadFile(path.join(APP_DIST_DIR, 'index.html'));
   }
   if (!app.isPackaged) {
     win.webContents.on('before-input-event', (_e, input) => {
@@ -782,7 +808,7 @@ ipcMain.handle('auth:signout', async () => {
 
 ipcMain.handle('jira:search-issues', async (_e, payload: { term?: string }) => {
   try {
-    const term = String(payload?.term ?? '').trim();
+    const term = String(payload?.term ?? '').trim().slice(0, 100);
     if (term.length < 2) return { ok: true, items: [] };
 
     const connection = getActiveJiraConnection();
@@ -792,11 +818,9 @@ ipcMain.handle('jira:search-issues', async (_e, payload: { term?: string }) => {
     if (!projectKey) {
       return { ok: false, error: `Jira project key mangler for "${connection.name}".` };
     }
-    const escapedTerm = term.replace(/"/g, '\\"');
-    const keyCandidate = term.toUpperCase().replace(/"/g, '\\"');
-    const clauses = [`summary ~ "${escapedTerm}*"`];
+    const clauses = [`summary ~ "${escapeJqlString(term)}*"`];
     if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(term)) {
-      clauses.unshift(`key = "${keyCandidate}"`);
+      clauses.unshift(`key = "${term.toUpperCase()}"`);
     }
     const jql = `project = "${projectKey}" AND (${clauses.join(' OR ')}) ORDER BY created DESC`;
     const url = buildJiraSearchUrl(connection, jql, ['key', 'summary', 'issuetype', 'assignee', 'reporter', 'customfield_10060'], 10);
@@ -1156,7 +1180,8 @@ ipcMain.handle(
 
 // Debug notification trigger (manual test without waiting for scheduler)
 ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
-  const body = opts?.body ?? 'Test notification';
+  if (app.isPackaged) return { ok: false };
+  const body = String(opts?.body ?? 'Test notification').slice(0, 200);
   const slot = new Date();
   const st = getSettings();
   const n = new Notification({ title: 'Work Logger (Test)', body, silent: !!st.notification_silent });
@@ -1273,6 +1298,9 @@ ipcMain.on('window:pointer-drag', (_e, payload: { phase?: unknown; kind?: unknow
 });
 
 app.whenReady().then(() => {
+  // The renderer needs no browser permissions (notifications are shown from the main process).
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
   console.log('[main] app is ready, initializing DB and window...');
   initDb();
   console.log('[main] creating main window...');

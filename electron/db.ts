@@ -1,5 +1,5 @@
 // electron/db.ts
-import { app } from 'electron';
+import { app, safeStorage } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { LowSync } from 'lowdb';
@@ -96,6 +96,31 @@ const DEFAULT_SETTINGS: Settings = {
 
 let db: LowSync<Data>;
 
+// Secrets are encrypted with the OS keychain (DPAPI on Windows) so worklogger.json never holds plain tokens.
+const SECRET_PREFIX = 'enc:v1:';
+
+function canEncrypt(): boolean {
+  try { return !!safeStorage?.isEncryptionAvailable(); } catch { return false; }
+}
+
+function encryptSecret(value: string): string {
+  if (!value || value.startsWith(SECRET_PREFIX) || !canEncrypt()) return value;
+  return SECRET_PREFIX + safeStorage.encryptString(value).toString('base64');
+}
+
+function decryptSecret(value: string): string {
+  if (!value?.startsWith(SECRET_PREFIX)) return value;
+  try {
+    return safeStorage.decryptString(Buffer.from(value.slice(SECRET_PREFIX.length), 'base64'));
+  } catch {
+    return '';
+  }
+}
+
+function encryptConnectionTokens(connections: JiraConnection[] | undefined): JiraConnection[] {
+  return (connections ?? []).map(c => ({ ...c, token: encryptSecret(c.token) }));
+}
+
 function sanitizeSlotMinutes(value: unknown): number {
   const parsed = Math.trunc(Number(value));
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SETTINGS.slot_minutes;
@@ -180,6 +205,11 @@ export function initDb() {
     }
     const activeJiraId = normalizeActiveJiraConnectionId(legacyJira.jira_connections, legacyJira.jira_active_connection_id);
     if (legacyJira.jira_active_connection_id !== activeJiraId) { legacyJira.jira_active_connection_id = activeJiraId; changed = true; }
+    const encrypted = encryptConnectionTokens(legacyJira.jira_connections);
+    if (encrypted.some((c, i) => c.token !== legacyJira.jira_connections![i].token)) {
+      legacyJira.jira_connections = encrypted;
+      changed = true;
+    }
     if (typeof db.data.settings.jira_log_on_afstem !== 'boolean') { db.data.settings.jira_log_on_afstem = DEFAULT_SETTINGS.jira_log_on_afstem!; changed = true; }
     if (db.data.settings.window_mode !== 'docked' && db.data.settings.window_mode !== 'detached') { db.data.settings.window_mode = DEFAULT_SETTINGS.window_mode; changed = true; }
     if (db.data.settings.detached_bounds === undefined) { db.data.settings.detached_bounds = null; changed = true; }
@@ -197,7 +227,8 @@ export function initDb() {
 export function getSettings(): Settings {
   ensureDb();
   db.read();
-  return db.data!.settings;
+  const s = db.data!.settings;
+  return { ...s, jira_connections: (s.jira_connections ?? []).map(c => ({ ...c, token: decryptSecret(c.token) })) };
 }
 export function saveSettings(s: Settings) {
   ensureDb();
@@ -224,7 +255,7 @@ export function saveSettings(s: Settings) {
     auto_start_on_login: !!s.auto_start_on_login,
     group_notifications: !!s.group_notifications,
     minimize_after_notification_submit: !!s.minimize_after_notification_submit,
-    jira_connections: jiraConnections,
+    jira_connections: encryptConnectionTokens(jiraConnections),
     jira_active_connection_id: normalizeActiveJiraConnectionId(jiraConnections, s.jira_active_connection_id ?? prev?.jira_active_connection_id),
     jira_log_on_afstem: !!s.jira_log_on_afstem,
     // Window state is owned by the main process; keep it unless explicitly provided.
@@ -251,6 +282,29 @@ function entryKey(e: Pick<Entry, 'day'|'start'>) {
   return `${e.day}T${e.start}`;
 }
 
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const HM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const MAX_TEXT_LENGTH = 500;
+
+/** Entries arrive from the renderer/import; keep only well-formed fields so the DB cannot be filled with junk. */
+function sanitizeEntry(raw: unknown, nowISO: string): Entry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const day = String(r['day'] ?? '');
+  const start = String(r['start'] ?? '');
+  const end = String(r['end'] ?? '');
+  if (!DAY_PATTERN.test(day) || !HM_PATTERN.test(start) || !HM_PATTERN.test(end) || end <= start) return null;
+  const createdAt = typeof r['created_at'] === 'string' && !Number.isNaN(Date.parse(r['created_at'])) ? r['created_at'] : nowISO;
+  return {
+    day,
+    start,
+    end,
+    description: String(r['description'] ?? '').slice(0, MAX_TEXT_LENGTH),
+    category: String(r['category'] ?? '').slice(0, MAX_TEXT_LENGTH),
+    created_at: createdAt
+  };
+}
+
 export function saveEntries(entries: Entry[]) {
   ensureDb();
   db.read();
@@ -262,12 +316,9 @@ export function saveEntries(entries: Entry[]) {
     existing.set(entryKey(e), e);
   }
 
-  for (const raw of entries) {
-    const e: Entry = {
-      ...raw,
-      created_at: raw.created_at ?? nowISO
-    };
-    existing.set(entryKey(e), e);
+  for (const raw of Array.isArray(entries) ? entries : []) {
+    const e = sanitizeEntry(raw, nowISO);
+    if (e) existing.set(entryKey(e), e);
   }
 
   db.data!.entries = Array.from(existing.values())
@@ -443,6 +494,10 @@ export function lastNEntries(n = 8) {
     .slice(0, n);
 }
 
+const MAX_IMPORT_LINES = 5000;
+// One segment can never be longer than a day; guards against e.g. 1970→2100 creating millions of slots.
+const MAX_IMPORT_SEGMENT_MINUTES = 24 * 60;
+
 /** Import external JSON lines describing time segments.
  * Format per line now supports an optional category field:
  * {"entry_id":"uuid","task":"Desc","segment_start":"2025-11-11T08:41:00","segment_end":"2025-11-11T08:56:00","minutes":15,"category":"Andet"}
@@ -453,7 +508,7 @@ export function lastNEntries(n = 8) {
 export function importExternalLines(raw: string) {
   ensureDb(); db.read();
   const slotMinutes = sanitizeSlotMinutes(getSettings().slot_minutes); // dynamic granularity
-  const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
+  const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0).slice(0, MAX_IMPORT_LINES);
   const imported: Entry[] = [];
   const details: { line: number; reason: string }[] = [];
   let skipped = 0;
@@ -475,6 +530,7 @@ export function importExternalLines(raw: string) {
     if (endDate <= startDate) { skipped++; details.push({ line: i+1, reason: 'End before start' }); continue; }
     // Expand into slot-sized entries fully contained in interval
     const intervalMinutes = (endDate.getTime() - startDate.getTime()) / 60000;
+    if (intervalMinutes > MAX_IMPORT_SEGMENT_MINUTES) { skipped++; details.push({ line: i+1, reason: 'Segment longer than 24 hours – ignored' }); continue; }
     // Floor first slot start to boundary
     const first = new Date(startDate);
     const boundaryMinutes = Math.floor(first.getMinutes() / slotMinutes) * slotMinutes;

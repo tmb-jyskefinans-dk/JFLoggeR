@@ -17,3 +17,8 @@ export const app = {
 export const BrowserWindow = class {} as any;
 export const Notification = class {} as any;
 export const ipcMain = { handle: () => {} } as any;
+export const safeStorage = {
+  isEncryptionAvailable: () => false,
+  encryptString: (value: string) => Buffer.from(value, 'utf8'),
+  decryptString: (buf: Buffer) => buf.toString('utf8')
+};

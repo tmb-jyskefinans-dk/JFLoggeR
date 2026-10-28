@@ -8,6 +8,7 @@ exports.normalizeActiveJiraConnectionId = normalizeActiveJiraConnectionId;
 exports.migrateLegacyJiraSettings = migrateLegacyJiraSettings;
 exports.resolveJiraConnection = resolveJiraConnection;
 exports.jiraConnectionMissingConfig = jiraConnectionMissingConfig;
+exports.escapeJqlString = escapeJqlString;
 exports.jiraApiBase = jiraApiBase;
 exports.jiraAuthHeaders = jiraAuthHeaders;
 exports.buildJiraSearchUrl = buildJiraSearchUrl;
@@ -45,7 +46,8 @@ function normalizeJiraConnection(raw) {
         name: String(c['name'] ?? '').trim() || (type === 'cloud' ? 'Jira Cloud' : 'Jira On-Premise'),
         type,
         base_url: normalizeJiraBaseUrl(c['base_url']),
-        project_key: String(c['project_key'] ?? '').trim().toUpperCase(),
+        // Project keys are interpolated into JQL, so only allow Jira's key alphabet.
+        project_key: String(c['project_key'] ?? '').toUpperCase().replace(/[^A-Z0-9_]/g, ''),
         token: String(c['token'] ?? '').trim(),
         email: type === 'cloud' ? String(c['email'] ?? '').trim() : ''
     };
@@ -73,7 +75,7 @@ function normalizeActiveJiraConnectionId(connections, activeId) {
 /** Converts the pre-multi-connection settings (single on-prem PSA key) to a connection list. */
 function migrateLegacyJiraSettings(legacy) {
     const token = String(legacy.jira_psa_key ?? '').trim();
-    const projectKey = String(legacy.jira_project_key ?? '').trim().toUpperCase();
+    const projectKey = String(legacy.jira_project_key ?? '').toUpperCase().replace(/[^A-Z0-9_]/g, '');
     if (!token && !projectKey)
         return [];
     return [{
@@ -101,6 +103,12 @@ function jiraConnectionMissingConfig(c) {
     if (c.type === 'cloud' && !c.email)
         return `Email mangler for Jira Cloud-forbindelsen "${c.name}".`;
     return null;
+}
+/** Escapes a value for use inside a double-quoted JQL string literal. */
+function escapeJqlString(value) {
+    return String(value ?? '')
+        .replace(/[\u0000-\u001f\u007f]/g, ' ')
+        .replace(/[\\"]/g, '\\$&');
 }
 function jiraApiBase(c) {
     return `${c.base_url}/rest/api/${c.type === 'cloud' ? '3' : '2'}`;
