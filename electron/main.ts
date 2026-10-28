@@ -150,16 +150,14 @@ import { azureAuth } from './auth';
 import {
   nextQuarter,
   previousSlotStart,
-  isWorkTime,
   isWorkdayEnabled,
   slotKey,
   daySlots,
   toLocalDateYMD,
   getSlotMinutes,
-  parseHM,
   shouldPromptForFinishedSlot
 } from './time';
-import { usesWeeklySchedule } from './work-schedule';
+import { hmToMinute, minuteToHm, uncoveredRanges } from './coverage';
 import { JiraApiIssue, mapAndRankJiraIssues } from './jira-search';
 import {
   JiraConnection,
@@ -637,21 +635,10 @@ function scheduleStaleCheck() {
   }, 60000);
 }
 
-function hmToMinutes(hm: string): number {
-  const { h, m } = parseHM(String(hm ?? '00:00'));
-  return h * 60 + m;
-}
-
-/** Returns true when slot start is already covered by an existing logged interval on that day. */
+/** True when the whole slot is logged; partial leftovers (e.g. from an older slot length) keep it pending. */
 function isSlotCoveredByEntries(slotStart: Date, entries: Array<{ start: string; end: string }>): boolean {
   const slotStartMinutes = slotStart.getHours() * 60 + slotStart.getMinutes();
-  for (const e of entries) {
-    const startM = hmToMinutes(e.start);
-    const endM = hmToMinutes(e.end);
-    if (!Number.isFinite(startM) || !Number.isFinite(endM) || endM <= startM) continue;
-    if (slotStartMinutes >= startM && slotStartMinutes < endM) return true;
-  }
-  return false;
+  return uncoveredRanges(slotStartMinutes, slotStartMinutes + getSlotMinutes(), entries).length === 0;
 }
 
 function rebuildBacklogForToday({ includeFuture = false }: { includeFuture?: boolean } = {}) {
@@ -1058,17 +1045,24 @@ ipcMain.handle('jira:get-logged-worklogs', async (_e, payload: { day: string }) 
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
 ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
   try {
+    const deleted = (getDayEntries(day) as Array<{ start: string; end: string }>).find(e => e.start === start);
     const removed = deleteEntry(day, start);
     try {
-      // If the slot is in the past (earlier than now), add back to pending so user can re-log
-      const [y, m, d] = day.split('-').map(Number);
-      const [hh, mm] = start.split(':').map(Number);
-      const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+      // Requeue the current-grid slots the deleted entry overlapped, even if it was logged with another slot length.
       const now = new Date();
-      const isToday = day === toLocalDateYMD(now);
-      const isScheduled = usesWeeklySchedule(getSettings()) ? isWorkTime(slotDate) : isWorkdayEnabled(slotDate);
-      const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isScheduled;
-      if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
+      if (deleted && day === toLocalDateYMD(now)) {
+        const from = hmToMinute(deleted.start);
+        const to = hmToMinute(deleted.end);
+        const gran = getSlotMinutes();
+        const remaining = getDayEntries(day) as Array<{ start: string; end: string }>;
+        for (const slot of daySlots(now)) {
+          const slotMin = slot.getHours() * 60 + slot.getMinutes();
+          if (slotMin + gran <= from || slotMin >= to) continue;
+          if (slot.getTime() + gran * 60000 > now.getTime()) continue;
+          if (!isSlotCoveredByEntries(slot, remaining)) enqueuePending(slotKey(slot), { silent: true });
+        }
+        try { win?.webContents.send('queue:updated'); } catch { }
+      }
     } catch { /* ignore parse errors */ }
     return { ok: true, removed };
   } catch (e) {
@@ -1092,6 +1086,7 @@ ipcMain.handle(
     _e,
     payload: { slots: string[]; description: string; category: string; minimizeWindowAfterSubmit?: boolean }
   ) => {
+    const created: Array<{ day: string; start: string }> = [];
     try {
       if (!payload || !Array.isArray(payload.slots)) return { ok: false, error: 'Invalid payload' };
       const description = String(payload.description ?? '').trim();
@@ -1115,30 +1110,16 @@ ipcMain.handle(
         if (!coverageByDay.has(day)) {
           coverageByDay.set(day, (getDayEntries(day) as Array<{ start: string; end: string }>).map(e => ({ start: e.start, end: e.end })));
         }
-        const [y, mo, d] = day.split('-').map(Number);
-        const slotStart = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
         const dayCoverage = coverageByDay.get(day)!;
-        if (isSlotCoveredByEntries(slotStart, dayCoverage)) {
-          consumedKeys.push(k);
-          continue;
+        // Only fill the parts of the slot that are still unlogged so leftovers are never overlapped.
+        const slotStartMin = hh * 60 + mm;
+        for (const [from, to] of uncoveredRanges(slotStartMin, slotStartMin + getSlotMinutes(), dayCoverage)) {
+          const entry = { day, start: minuteToHm(from), end: minuteToHm(to), description, category };
+          if (!groupedByDay.has(day)) groupedByDay.set(day, []);
+          groupedByDay.get(day)!.push(entry);
+          dayCoverage.push({ start: entry.start, end: entry.end });
+          created.push({ day, start: entry.start });
         }
-        const slotLen = getSlotMinutes();
-        const endTotal = hh * 60 + mm + slotLen;
-        const endMin = endTotal % 60;
-        const endHour = Math.floor(endTotal / 60) % 24;
-        const entry = {
-          day,
-          start: `${h}:${m}`,
-          end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(
-            2,
-            '0'
-          )}`,
-          description,
-          category
-        };
-        if (!groupedByDay.has(day)) groupedByDay.set(day, []);
-        groupedByDay.get(day)!.push(entry);
-        dayCoverage.push({ start: entry.start, end: entry.end });
         consumedKeys.push(k);
       }
       groupedByDay.forEach((list) => saveEntries(list));
@@ -1169,7 +1150,7 @@ ipcMain.handle(
     if (payload?.minimizeWindowAfterSubmit && windowMode === 'detached') {
       try { win?.minimize(); } catch { }
     }
-    return { ok: true };
+    return { ok: true, created };
   }
 );
 

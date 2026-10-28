@@ -110,7 +110,7 @@ export class IslandComponent implements OnDestroy {
   });
 
   busy = signal(false);
-  justLogged = signal<{ day: string; start: string } | null>(null);
+  justLogged = signal<Array<{ day: string; start: string }> | null>(null);
   pulseKind = signal<'slot' | 'stale' | 'digest' | null>(null);
   private pulseTimer: ReturnType<typeof setTimeout> | null = null;
   private undoTimer: ReturnType<typeof setTimeout> | null = null;
@@ -216,10 +216,10 @@ export class IslandComponent implements OnDestroy {
     // Hold before submitting so the emptied queue never shrinks the island mid-undo.
     this.holdCompact.set(true);
     try {
-      await this.ipc.submitPending([slot], entry.description, entry.category);
-      const [day, start] = slot.split('T');
+      const created = await this.ipc.submitPending([slot], entry.description, entry.category);
+      const [day] = slot.split('T');
       this.ipc.loadDay(day);
-      this.justLogged.set({ day, start });
+      this.justLogged.set(created.length ? created : null);
       if (this.undoTimer) clearTimeout(this.undoTimer);
       this.undoTimer = setTimeout(() => {
         this.justLogged.set(null);
@@ -240,7 +240,7 @@ export class IslandComponent implements OnDestroy {
     if (this.undoTimer) clearTimeout(this.undoTimer);
     this.holdCompact.set(false);
     try {
-      await this.ipc.deleteEntry(logged.day, logged.start);
+      for (const item of logged) await this.ipc.deleteEntry(item.day, item.start);
     } catch {
       this.snackbar.show('Fortryd fejlede.');
     }

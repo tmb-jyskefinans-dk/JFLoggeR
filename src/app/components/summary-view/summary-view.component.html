@@ -154,9 +154,9 @@
           <div class="space-y-2" role="group" aria-label="Horisontal søjlediagram over minutter pr. kategori">
             @for(c of categoryChartData(); track c.category) {
               <div class="flex items-center gap-2">
-       <div class="w-56 truncate text-[11px] font-medium" [style.color]="c.color"
+       <div class="w-56 truncate text-[11px] font-medium text-slate-700 dark:text-slate-200 flex items-center gap-1.5"
          [attr.title]="c.category || 'Ingen kategori'"
-         [attr.aria-label]="c.category || 'Ingen kategori'">{{c.category || 'Ingen'}}</div>
+         [attr.aria-label]="c.category || 'Ingen kategori'"><span class="h-2 w-2 shrink-0 rounded-full" [style.background]="c.color" aria-hidden="true"></span><span class="truncate">{{c.category || 'Ingen'}}</span></div>
                 <div class="flex-1 h-3 rounded bg-slate-200 dark:bg-slate-700 overflow-hidden" aria-hidden="true">
                   <div class="h-full bar-fill" [style.background]="c.color" [style.width.%]="animateBars() ? c.percent : 0" title="{{c.minutes}} min ({{c.percent|number:'1.0-1'}}%)" tabindex="0" [attr.aria-label]="c.category + ' bar: ' + c.minutes + ' minutter (' + (c.percent|number:'1.0-1') + '%)'"></div>
                 </div>
@@ -225,8 +225,8 @@
           <tr class="transition-colors hover:bg-indigo-50 dark:hover:bg-slate-700/60 hover:text-slate-900 dark:hover:text-slate-50">
             <th scope="row" class="py-2 font-medium text-left">{{s.description}}</th>
             <td>
-              <span [style.background]="getColor(s.category)" class="inline-block w-3 h-3 rounded-sm align-middle mr-2" aria-hidden="true"></span>
-              <span [style.color]="getColor(s.category)" class="font-semibold">{{s.category}}</span>
+              <span [style.background]="getColor(s.category)" class="inline-block w-3 h-3 rounded-full align-middle mr-2" aria-hidden="true"></span>
+              <span class="font-semibold text-slate-700 dark:text-slate-200">{{s.category}}</span>
             </td>
             <td class="text-slate-600 dark:text-slate-300">{{s.slots}}</td>
             <td class="text-slate-600 dark:text-slate-300">{{s.minutes}}</td>

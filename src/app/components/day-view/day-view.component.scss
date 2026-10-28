@@ -1,2 +1,63 @@
 /* Day view component: using inline Tailwind utility classes in template */
 :host { display:block; }
+
+.day-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  color: rgb(71 85 105);
+  transition: background-color 0.15s ease;
+
+  &:hover { background: rgb(241 245 249); }
+  &:focus-visible { outline: 2px solid rgb(99 102 241); outline-offset: 2px; }
+}
+:host-context(.dark) .day-nav-btn { color: rgb(203 213 225); &:hover { background: rgb(51 65 85); } }
+
+// Category colour is applied as the left border inline.
+.day-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.625rem 0.5rem 0.625rem 0.875rem;
+  border: 1px solid rgb(226 232 240);
+  border-left-width: 4px;
+  border-radius: 0.5rem;
+  background: white;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover { box-shadow: 0 1px 3px rgb(15 23 42 / 0.08); }
+}
+:host-context(.dark) .day-block { background: rgb(30 41 59); border-top-color: rgb(51 65 85); border-right-color: rgb(51 65 85); border-bottom-color: rgb(51 65 85); }
+
+.day-block-missing {
+  align-items: center;
+  border-style: dashed;
+  border-left-style: solid;
+  border-color: rgb(253 164 175);
+  background: rgb(255 241 242 / 0.6);
+  color: rgb(190 18 60);
+}
+:host-context(.dark) .day-block-missing { border-color: rgb(159 18 57 / 0.7); background: rgb(136 19 55 / 0.15); color: rgb(253 164 175); }
+
+// Delete stays reachable by keyboard but only draws attention on hover/focus.
+.day-block-delete {
+  align-self: flex-start;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  color: rgb(148 163 184);
+  opacity: 0.4;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+
+  &:hover { color: rgb(225 29 72); background: rgb(255 241 242); }
+  &:focus-visible { opacity: 1; outline: 2px solid rgb(244 63 94); outline-offset: 1px; }
+}
+.day-block:hover .day-block-delete { opacity: 1; }
+:host-context(.dark) .day-block-delete:hover { background: rgb(136 19 55 / 0.3); color: rgb(251 113 133); }

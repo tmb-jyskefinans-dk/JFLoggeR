@@ -99,7 +99,7 @@ declare global {
       getPendingSlots(): Promise<string[]>;
       getSettings(): Promise<any>;
       saveSettings(settings: any): Promise<void>;
-      submitSlots(payload: { slots: string[]; description: string; category: string; minimizeWindowAfterSubmit?: boolean }): Promise<{ ok: boolean; error?: string }>;
+      submitSlots(payload: { slots: string[]; description: string; category: string; minimizeWindowAfterSubmit?: boolean }): Promise<{ ok: boolean; error?: string; created?: Array<{ day: string; start: string }> }>;
       deleteEntry(day: string, start: string): Promise<{ ok: boolean; removed?: number; error?: string }>;
       onPrompt(cb: (d: { slot?: string; source?: string }) => void): (() => void) | void;
       onFocus(cb: () => void): (() => void) | void;
@@ -344,6 +344,7 @@ export class IpcService {
         if (!resp?.ok) throw new Error(resp?.error || 'submitPending failed');
         this.loadPending();
         this.refreshDays();
+        return resp.created ?? [];
       });
   }
 

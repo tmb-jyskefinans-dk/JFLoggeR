@@ -113,7 +113,7 @@ const stale_1 = require("./stale");
 const db_2 = require("./db");
 const auth_1 = require("./auth");
 const time_1 = require("./time");
-const work_schedule_1 = require("./work-schedule");
+const coverage_1 = require("./coverage");
 const jira_search_1 = require("./jira-search");
 const jira_client_1 = require("./jira-client");
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
@@ -653,22 +653,10 @@ function scheduleStaleCheck() {
         catch { /* ignore */ }
     }, 60000);
 }
-function hmToMinutes(hm) {
-    const { h, m } = (0, time_1.parseHM)(String(hm ?? '00:00'));
-    return h * 60 + m;
-}
-/** Returns true when slot start is already covered by an existing logged interval on that day. */
+/** True when the whole slot is logged; partial leftovers (e.g. from an older slot length) keep it pending. */
 function isSlotCoveredByEntries(slotStart, entries) {
     const slotStartMinutes = slotStart.getHours() * 60 + slotStart.getMinutes();
-    for (const e of entries) {
-        const startM = hmToMinutes(e.start);
-        const endM = hmToMinutes(e.end);
-        if (!Number.isFinite(startM) || !Number.isFinite(endM) || endM <= startM)
-            continue;
-        if (slotStartMinutes >= startM && slotStartMinutes < endM)
-            return true;
-    }
-    return false;
+    return (0, coverage_1.uncoveredRanges)(slotStartMinutes, slotStartMinutes + (0, time_1.getSlotMinutes)(), entries).length === 0;
 }
 function rebuildBacklogForToday({ includeFuture = false } = {}) {
     // Build backlog only for finished unlogged slots.
@@ -1076,18 +1064,30 @@ electron_1.ipcMain.handle('jira:get-logged-worklogs', async (_e, payload) => {
 // Delete single entry and (re)queue slot if it's in the past, allowing user to relog it
 electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
     try {
+        const deleted = (0, db_1.getDayEntries)(day).find(e => e.start === start);
         const removed = (0, db_1.deleteEntry)(day, start);
         try {
-            // If the slot is in the past (earlier than now), add back to pending so user can re-log
-            const [y, m, d] = day.split('-').map(Number);
-            const [hh, mm] = start.split(':').map(Number);
-            const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+            // Requeue the current-grid slots the deleted entry overlapped, even if it was logged with another slot length.
             const now = new Date();
-            const isToday = day === (0, time_1.toLocalDateYMD)(now);
-            const isScheduled = (0, work_schedule_1.usesWeeklySchedule)((0, db_1.getSettings)()) ? (0, time_1.isWorkTime)(slotDate) : (0, time_1.isWorkdayEnabled)(slotDate);
-            const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isScheduled;
-            if (shouldRequeue)
-                enqueuePending(`${day}T${start}`); // emits queue:updated
+            if (deleted && day === (0, time_1.toLocalDateYMD)(now)) {
+                const from = (0, coverage_1.hmToMinute)(deleted.start);
+                const to = (0, coverage_1.hmToMinute)(deleted.end);
+                const gran = (0, time_1.getSlotMinutes)();
+                const remaining = (0, db_1.getDayEntries)(day);
+                for (const slot of (0, time_1.daySlots)(now)) {
+                    const slotMin = slot.getHours() * 60 + slot.getMinutes();
+                    if (slotMin + gran <= from || slotMin >= to)
+                        continue;
+                    if (slot.getTime() + gran * 60000 > now.getTime())
+                        continue;
+                    if (!isSlotCoveredByEntries(slot, remaining))
+                        enqueuePending((0, time_1.slotKey)(slot), { silent: true });
+                }
+                try {
+                    win?.webContents.send('queue:updated');
+                }
+                catch { }
+            }
         }
         catch { /* ignore parse errors */ }
         return { ok: true, removed };
@@ -1111,6 +1111,7 @@ electron_1.ipcMain.handle('queue:get', () => {
     return Array.from(pending).sort();
 });
 electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
+    const created = [];
     try {
         if (!payload || !Array.isArray(payload.slots))
             return { ok: false, error: 'Invalid payload' };
@@ -1135,28 +1136,17 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
             if (!coverageByDay.has(day)) {
                 coverageByDay.set(day, (0, db_1.getDayEntries)(day).map(e => ({ start: e.start, end: e.end })));
             }
-            const [y, mo, d] = day.split('-').map(Number);
-            const slotStart = new Date(y, (mo || 1) - 1, d || 1, hh, mm, 0, 0);
             const dayCoverage = coverageByDay.get(day);
-            if (isSlotCoveredByEntries(slotStart, dayCoverage)) {
-                consumedKeys.push(k);
-                continue;
+            // Only fill the parts of the slot that are still unlogged so leftovers are never overlapped.
+            const slotStartMin = hh * 60 + mm;
+            for (const [from, to] of (0, coverage_1.uncoveredRanges)(slotStartMin, slotStartMin + (0, time_1.getSlotMinutes)(), dayCoverage)) {
+                const entry = { day, start: (0, coverage_1.minuteToHm)(from), end: (0, coverage_1.minuteToHm)(to), description, category };
+                if (!groupedByDay.has(day))
+                    groupedByDay.set(day, []);
+                groupedByDay.get(day).push(entry);
+                dayCoverage.push({ start: entry.start, end: entry.end });
+                created.push({ day, start: entry.start });
             }
-            const slotLen = (0, time_1.getSlotMinutes)();
-            const endTotal = hh * 60 + mm + slotLen;
-            const endMin = endTotal % 60;
-            const endHour = Math.floor(endTotal / 60) % 24;
-            const entry = {
-                day,
-                start: `${h}:${m}`,
-                end: `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
-                description,
-                category
-            };
-            if (!groupedByDay.has(day))
-                groupedByDay.set(day, []);
-            groupedByDay.get(day).push(entry);
-            dayCoverage.push({ start: entry.start, end: entry.end });
             consumedKeys.push(k);
         }
         groupedByDay.forEach((list) => (0, db_1.saveEntries)(list));
@@ -1196,7 +1186,7 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
         }
         catch { }
     }
-    return { ok: true };
+    return { ok: true, created };
 });
 // Debug notification trigger (manual test without waiting for scheduler)
 electron_1.ipcMain.handle('debug:notify', (_e, opts) => {

@@ -1,4 +1,4 @@
-import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, OnDestroy } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, untracked, OnDestroy } from '@angular/core';
 import { getCategoryColor } from '../../models/category-colors';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -8,11 +8,27 @@ import { ClockService } from '../../services/clock.service';
 import { getActiveJiraConnection, getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
 import { SnackbarService } from '../../services/snackbar.service';
 import {
+  categoryTotals,
+  formatDuration,
+  groupDayBlocks,
+  missingRowsForDay,
+  plannedMinutesForDay,
+  shiftYmd,
+  splitJiraKey,
+  type DayBlock,
+  type DayRowLike
+} from './day-blocks.util';
+import {
   effectiveSlotMinutes,
-  slotStartMinutesForWeekday,
-  weekdayFromYmd,
   type WorkScheduleSettingsLike
 } from '../../models/work-schedule';
+
+type DayRow = DayBlock<DayRowLike> & {
+  jiraKey: string;
+  text: string;
+  color: string;
+  durationLabel: string;
+};
 
 @Component({
   selector: 'day-view',
@@ -31,7 +47,8 @@ export class DayViewComponent implements OnDestroy {
   // Source signals
   day = signal<string>('');
   isTodayView = signal(false);
-  selectedMissingSlots = signal<string[]>([]);
+  confirmDeleteStart = signal<string | null>(null);
+  private confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
   archiveJiraConfirmOpen = signal(false);
   archiveJiraConfirmDay = signal('');
   archiveJiraConfirmRows = signal<Array<{ description: string; category: string; minutes: number }>>([]);
@@ -81,13 +98,12 @@ export class DayViewComponent implements OnDestroy {
     return groups;
   });
 
-  beginEdit(row: any, ev?: Event) {
-    if (!row || row.missing) return;
-    const key = `${row.day}T${row.start}`;
-    this.editingKey.set(key);
+  beginEdit(block: DayRow, ev?: Event) {
+    if (!block || block.kind !== 'entry' || this.dayLocked()) return;
+    this.editingKey.set(block.start);
     // Compute viewport position for dropdown to avoid scroll container clipping
     if (ev && ev.target) {
-      const el = (ev.target as HTMLElement).closest('td') || (ev.target as HTMLElement);
+      const el = (ev.target as HTMLElement).closest('button') || (ev.target as HTMLElement);
       if (el) {
         const rect = el.getBoundingClientRect();
         // Position below cell; adjust if near bottom later if needed
@@ -109,15 +125,15 @@ export class DayViewComponent implements OnDestroy {
     }
   }
   cancelEdit() { this.editingKey.set(null); }
-  isEditing(row: any) { return !!row && !row.missing && this.editingKey() === `${row.day}T${row.start}`; }
-  applyCategory(row: any, cat: string) {
-    if (!row || row.missing || !cat) return;
-    const entry = { day: row.day, start: row.start, end: row.end, description: row.description, category: cat };
-    try { (window as any).workApi.saveEntries([entry]); } catch { }
-    // Refresh signals
-    this.ipc.loadDay(this.day());
-    this.ipc.refreshDays();
+  isEditing(block: DayRow) { return !!block && block.kind === 'entry' && this.editingKey() === block.start; }
+  async applyCategory(block: DayRow, cat: string) {
+    if (!block || block.kind !== 'entry' || !cat) return;
+    const day = this.day();
+    const entries = block.rows.map(r => ({ day, start: r.start, end: r.end, description: r.description, category: cat }));
     this.editingKey.set(null);
+    try { await window.workApi.saveEntries(entries); } catch { this.snackbar.show('Kunne ikke ændre kategori.'); }
+    this.ipc.loadDay(day);
+    this.ipc.refreshDays();
   }
 
   // Derived / mirrored signals from service
@@ -132,93 +148,85 @@ export class DayViewComponent implements OnDestroy {
   });
 
   /**
-   * Combined rows (real entries + missing placeholder intervals) sorted by start time.
-   * A placeholder row has shape { start: string; end: string; missing: true }.
+   * Logged entries plus missing ranges (exact unlogged minutes of each scheduled slot), sorted by start.
    * Depends on clock.currentTime() to auto-update missing blocks as time passes.
    */
-  rows = computed(() => {
-    // Include currentTime to trigger refresh every minute
-    this.clock.currentTime();
-    
-    const list = this.entries();
+  rows = computed<DayRowLike[]>(() => {
+    const currentMinutes = this.clock.currentTime();
+    const list = this.entries() as DayRowLike[];
     const s = this.settings();
     const day = this.day();
     if (!day || !s) return list;
-    const slotMinutes = effectiveSlotMinutes(s);
-    const weekday = weekdayFromYmd(day);
-    if (weekday === null) return list;
-    const slotStarts = slotStartMinutesForWeekday(s, weekday);
-    if (!slotStarts) return list;
-    // Build coverage set of slot start minutes covered by existing entries.
-    // Entry coverage: any slot whose start minute >= entry.start and < entry.end considered covered.
-    const covered = new Set<number>();
-    for (const e of list) {
-      if (!e.start || !e.end) continue;
-      const [sh, sm] = e.start.split(':').map(Number);
-      const [eh, em] = e.end.split(':').map(Number);
-      const es = sh * 60 + sm;
-      const ee = eh * 60 + em;
-      if (ee <= es) continue; // skip invalid
-      for (let m = es; m < ee; m += slotMinutes) {
-        if (m % slotMinutes === 0) covered.add(m);
-      }
-    }
-    // Current time filtering for today: only include missing slots that have ended already.
-    let nowLimitM = Infinity;
-    if (day === this.clock.today()) {
-      nowLimitM = this.clock.currentTime();
-    }
-    const placeholders: any[] = [];
-    const placeholderStarts = new Set<string>();
-    for (const m of slotStarts) {
-      if (m >= nowLimitM) break; // don't show future intervals for current day
-      if (!covered.has(m)) {
-        const h = Math.floor(m / 60), mm = m % 60;
-        const start = `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-        const endMin = m + slotMinutes;
-        const eh = Math.floor(endMin / 60), emm = endMin % 60;
-        const end = `${String(eh).padStart(2,'0')}:${String(emm).padStart(2,'0')}`;
-        placeholders.push({ start, end, description: '', category: '', missing: true });
-        placeholderStarts.add(start);
-      }
-    }
-
-    // Also include live pending slots for this day so notification-triggered slots
-    // appear immediately, even before the minute ticker catches up.
-    const pendingForDay = this.pendingSlotsForDay();
-    for (const slot of pendingForDay) {
-      const start = slot.slice(11, 16);
-      if (!start || placeholderStarts.has(start)) continue;
-      const [sh, sm] = start.split(':').map(Number);
-      const startMins = sh * 60 + sm;
-      if (covered.has(startMins)) continue;
-      const endMin = startMins + slotMinutes;
-      const eh = Math.floor(endMin / 60), emm = endMin % 60;
-      const end = `${String(eh).padStart(2,'0')}:${String(emm).padStart(2,'0')}`;
-      placeholders.push({ start, end, description: '', category: '', missing: true });
-      placeholderStarts.add(start);
-    }
-
-    // Merge & sort
-    const merged = [...list, ...placeholders].sort((a:any,b:any)=> a.start.localeCompare(b.start));
-    return merged;
+    const nowLimit = day === this.clock.today() ? currentMinutes : Infinity;
+    // Pending slots appear immediately, even before the minute ticker catches up.
+    const pendingStarts = new Set(this.pendingSlotsForDay().map(k => k.slice(11, 16)));
+    const missing = missingRowsForDay(list, s, day, nowLimit, pendingStarts);
+    return [...list, ...missing].sort((a, b) => a.start.localeCompare(b.start));
   });
 
   missingSlotKeys = computed(() => {
     const day = this.day();
     if (!day) return [] as string[];
-    return this.rows()
-      .filter(r => !!r?.missing)
-      .map(r => `${day}T${r.start}`);
+    const starts = new Set(this.rows().filter(r => r.missing && r.slotStart).map(r => r.slotStart!));
+    return [...starts].map(start => `${day}T${start}`);
   });
 
-  allMissingSelected = computed(() => {
-    const missing = this.missingSlotKeys();
-    const selected = this.selectedMissingSlots();
-    return missing.length > 0 && missing.every(s => selected.includes(s));
+  blocks = computed<DayRow[]>(() => groupDayBlocks(this.rows())
+    .map(b => {
+      const { key, text } = splitJiraKey(b.description);
+      return { ...b, jiraKey: key, text, color: b.kind === 'entry' ? getCategoryColor(b.category) : '', durationLabel: formatDuration(b.minutes) };
+    }));
+  private entryBlocks = computed(() => this.blocks().filter(b => b.kind === 'entry'));
+  loggedMinutesDay = computed(() => this.entryBlocks().reduce((sum, b) => sum + b.minutes, 0));
+  plannedMinutesDay = computed(() => plannedMinutesForDay(this.settings(), this.day()));
+  missingMinutesDay = computed(() => this.blocks().filter(b => b.kind === 'missing').reduce((sum, b) => sum + b.minutes, 0));
+  loggedLabel = computed(() => formatDuration(this.loggedMinutesDay()));
+  plannedLabel = computed(() => formatDuration(this.plannedMinutesDay()));
+  missingLabel = computed(() => formatDuration(this.missingMinutesDay()));
+  progressPct = computed(() => {
+    const planned = this.plannedMinutesDay();
+    return planned > 0 ? Math.round((this.loggedMinutesDay() / planned) * 100) : 0;
+  });
+  categoryBreakdown = computed(() => {
+    const totals = categoryTotals(this.entries());
+    const scale = Math.max(this.plannedMinutesDay(), totals.reduce((sum, c) => sum + c.minutes, 0));
+    return totals.map(c => ({
+      ...c,
+      color: getCategoryColor(c.category),
+      label: formatDuration(c.minutes),
+      pct: scale > 0 ? (c.minutes / scale) * 100 : 0
+    }));
+  });
+  breakdownAria = computed(() => {
+    const parts = this.categoryBreakdown().map(c => `${c.category} ${c.label}`);
+    return parts.length ? `Fordeling: ${parts.join(', ')}` : 'Ingen registreringer';
   });
 
-  selectedMissingCount = computed(() => this.selectedMissingSlots().length);
+  isToday = computed(() => this.day() === this.clock.today());
+  prevDay = computed(() => this.day() ? shiftYmd(this.day(), -1) : '');
+  nextDay = computed(() => this.day() ? shiftYmd(this.day(), 1) : '');
+  canGoNext = computed(() => !!this.day() && this.day() < this.clock.today());
+  dayLink(ymd: string): unknown[] {
+    return ymd === this.clock.today() ? ['/today'] : ['/day', ymd];
+  }
+  dayHeading = computed(() => {
+    const ymd = this.day();
+    if (!ymd) return '';
+    if (ymd === this.clock.today()) return 'I dag';
+    if (ymd === shiftYmd(this.clock.today(), -1)) return 'I går';
+    const [y, m, d] = ymd.split('-').map(Number);
+    const name = new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('da-DK', { weekday: 'long' });
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  });
+  dayLongDate = computed(() => {
+    const ymd = this.day();
+    if (!ymd) return '';
+    const [y, m, d] = ymd.split('-').map(Number);
+    const date = new Date(y, (m || 1) - 1, d || 1);
+    const long = date.toLocaleDateString('da-DK', { day: 'numeric', month: 'long', year: 'numeric' });
+    const isNamedDay = ymd === this.clock.today() || ymd === shiftYmd(this.clock.today(), -1);
+    return isNamedDay ? `${date.toLocaleDateString('da-DK', { weekday: 'long' })} ${long}` : long;
+  });
 
   // Ordered categories using same logic as summary (group declaration order then extras)
   orderedCategories = computed(() => {
@@ -240,23 +248,19 @@ export class DayViewComponent implements OnDestroy {
   getColor(cat: string): string { return getCategoryColor(cat); }
 
   private weekdayNames = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
-  formattedDay = computed(() => {
-    const ymd = this.day();
-    if (!ymd) return '';
-    const [y,m,d] = ymd.split('-').map(Number);
-    const dt = new Date(y, (m||1)-1, d||1);
-    return `${this.weekdayNames[dt.getDay()]} ${ymd}`;
-  });
   dayLocked = computed(() => {
     const day = this.day();
     return !!day && !!this.ipc.dayExported().get(day);
   });
-  daysWithWeekday = computed(() => this.days().map(d => {
-    const [y,m,dd] = d.day.split('-').map(Number);
-    const dt = new Date(y,(m||1)-1,dd||1);
-    const exported = this.ipc.dayExported().get(d.day) || false;
-    return { ...d, weekday: this.weekdayNames[dt.getDay()], exported };
-  }));
+  daysWithWeekday = computed(() => {
+    const slotMinutes = effectiveSlotMinutes(this.settings());
+    return this.days().map(d => {
+      const [y,m,dd] = d.day.split('-').map(Number);
+      const dt = new Date(y,(m||1)-1,dd||1);
+      const exported = this.ipc.dayExported().get(d.day) || false;
+      return { ...d, weekday: this.weekdayNames[dt.getDay()], exported, durationLabel: formatDuration(d.slots * slotMinutes) };
+    });
+  });
 
   currentMonthKey = computed(() => this.clock.today().slice(0, 7));
   currentYearKey = computed(() => this.clock.today().slice(0, 4));
@@ -318,11 +322,9 @@ export class DayViewComponent implements OnDestroy {
     }
   });
 
-  private pruneSelectionEffect = effect(() => {
-    const missing = new Set(this.missingSlotKeys());
-    const selected = this.selectedMissingSlots();
-    const next = selected.filter(s => missing.has(s));
-    if (next.length !== selected.length) this.selectedMissingSlots.set(next);
+  private resetDeleteOnDayChange = effect(() => {
+    this.day();
+    untracked(() => this.resetDeleteConfirm());
   });
 
   private keepCurrentMonthExpandedEffect = effect(() => {
@@ -368,65 +370,52 @@ export class DayViewComponent implements OnDestroy {
 
   ngOnDestroy() {
     window.removeEventListener('pointerdown', this.onPointerDown);
+    this.resetDeleteConfirm();
   }
 
-  remove(e: any) {
-    if (this.dayLocked()) return;
-    if (!e || !e.day || !e.start) return;
-    this.ipc.deleteEntry(e.day, e.start);
-  }
-
-  isMissingSelected(start: string) {
+  /** Single slots delete at once; multi-slot blocks need a second click within a few seconds. */
+  async removeBlock(block: DayRow) {
+    if (this.dayLocked() || !block || block.kind !== 'entry') return;
+    if (block.rows.length > 1 && this.confirmDeleteStart() !== block.start) {
+      this.resetDeleteConfirm();
+      this.confirmDeleteStart.set(block.start);
+      this.confirmDeleteTimer = setTimeout(() => this.resetDeleteConfirm(), 4000);
+      return;
+    }
+    this.resetDeleteConfirm();
     const day = this.day();
-    if (!day || !start) return false;
-    return this.selectedMissingSlots().includes(`${day}T${start}`);
+    try {
+      for (const row of block.rows) await this.ipc.deleteEntry(day, row.start);
+    } catch {
+      this.snackbar.show('Kunne ikke slette registreringen.');
+    }
   }
 
-  toggleMissingSelection(start: string) {
-    if (this.dayLocked()) return;
+  private resetDeleteConfirm() {
+    if (this.confirmDeleteTimer) clearTimeout(this.confirmDeleteTimer);
+    this.confirmDeleteTimer = null;
+    this.confirmDeleteStart.set(null);
+  }
+
+  logBlock(block: DayRow) {
     const day = this.day();
-    if (!day || !start) return;
-    const key = `${day}T${start}`;
-    const set = new Set(this.selectedMissingSlots());
-    set.has(key) ? set.delete(key) : set.add(key);
-    this.selectedMissingSlots.set(Array.from(set).sort());
+    if (!block || block.kind !== 'missing') return;
+    const starts = new Set(block.rows.map(r => r.slotStart ?? r.start));
+    this.openLogDialogFor([...starts].map(start => `${day}T${start}`));
   }
 
-  toggleAllMissingSelection() {
-    if (this.dayLocked()) return;
-    if (this.allMissingSelected()) this.selectedMissingSlots.set([]);
-    else this.selectedMissingSlots.set([...this.missingSlotKeys()].sort());
+  logAllMissing() {
+    this.openLogDialogFor(this.missingSlotKeys());
   }
 
-  logSelectedMissing() {
-    if (this.dayLocked()) return;
-    const selected = this.selectedMissingSlots();
-    if (!selected.length) return;
+  private openLogDialogFor(slots: string[]) {
+    if (this.dayLocked() || !slots.length) return;
+    const sorted = [...slots].sort();
     const currentPending = new Set(this.ipc.pendingSlots());
-    for (const s of selected) currentPending.add(s);
+    for (const s of sorted) currentPending.add(s);
     this.ipc.pendingSlots.set(Array.from(currentPending).sort());
-    this.ipc.preselectedSlots.set([...selected].sort());
-    try {
-      window.dispatchEvent(new CustomEvent('open-log-dialog', { detail: { slots: selected } }));
-    } catch { /* ignore */ }
-  }
-
-  /** Add a missing slot to the pending list & open the log dialog pre-selecting it. */
-  logMissing(start: string) {
-    if (this.dayLocked()) return;
-    const day = this.day();
-    if (!day || !start) return;
-    const slotKey = `${day}T${start}`;
-    // Ensure pendingSlots signal includes it so dialog can select it.
-    const current = this.ipc.pendingSlots();
-    if (!current.includes(slotKey)) this.ipc.pendingSlots.set([...current, slotKey].sort());
-    this.ipc.preselectedSlots.set([slotKey]);
-    // Set prompt slot so LogDialog can auto-select it
-    try { this.ipc.lastPromptSlot.set(slotKey); } catch { /* ignore */ }
-    // Dispatch custom event listened by AppComponent to open dialog.
-    try {
-      window.dispatchEvent(new CustomEvent('open-log-dialog', { detail: { slot: slotKey } }));
-    } catch { /* ignore */ }
+    this.ipc.preselectedSlots.set(sorted);
+    window.dispatchEvent(new CustomEvent('open-log-dialog', { detail: { slots: sorted } }));
   }
 
   toggleExported(day: string, ev: Event) {
@@ -614,34 +603,9 @@ export class DayViewComponent implements OnDestroy {
   }
 }
 
-// Pure helper used for tests (reuses logic above without signals)
-export function computeMissingRows(entries: { start:string; end:string; description?:string; category?:string }[], settings: WorkScheduleSettingsLike, day: string, nowMinutesSinceMidnight: number): any[] {
+// Pure helper used for tests (same logic as the rows signal)
+export function computeMissingRows(entries: DayRowLike[], settings: WorkScheduleSettingsLike, day: string, nowMinutesSinceMidnight: number): DayRowLike[] {
   if (!day || !settings) return entries;
-  const slotMinutes = effectiveSlotMinutes(settings);
-  const weekday = weekdayFromYmd(day);
-  if (weekday === null) return entries;
-  const slotStarts = slotStartMinutesForWeekday(settings, weekday);
-  if (!slotStarts) return entries;
-  const covered = new Set<number>();
-  for (const e of entries) {
-    if (!e.start || !e.end) continue;
-    const [sh,sm] = e.start.split(':').map(Number);
-    const [eh,em] = e.end.split(':').map(Number);
-    const es = sh*60+sm, ee = eh*60+em;
-    if (ee <= es) continue;
-    for (let m = es; m < ee; m += slotMinutes) if (m % slotMinutes === 0) covered.add(m);
-  }
-  const placeholders: any[] = [];
-  for (const m of slotStarts) {
-    if (m >= nowMinutesSinceMidnight) break;
-    if (!covered.has(m)) {
-      const h = Math.floor(m/60), mm = m%60;
-      const start = `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-      const endMin = m + slotMinutes;
-      const eh = Math.floor(endMin/60), emm = endMin%60;
-      const end = `${String(eh).padStart(2,'0')}:${String(emm).padStart(2,'0')}`;
-      placeholders.push({ start, end, description:'', category:'', missing:true });
-    }
-  }
-  return [...entries, ...placeholders].sort((a:any,b:any)=> a.start.localeCompare(b.start));
+  return [...entries, ...missingRowsForDay(entries, settings, day, nowMinutesSinceMidnight)]
+    .sort((a, b) => a.start.localeCompare(b.start));
 }
