@@ -2,8 +2,9 @@ import { Component, inject, ChangeDetectionStrategy, effect, signal, computed, O
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
-import { IpcService } from '../../services/ipc.service';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { IpcService, JiraConnection, JiraDeployment, JiraIdentityResult } from '../../services/ipc.service';
+import { FormArray, FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { isJiraConnectionUsable } from '../shared/jira-afstem.util';
 import {
   ALL_WORK_SLOT_STARTS,
   effectiveSlotMinutes,
@@ -15,6 +16,34 @@ import {
   type WorkSchedule,
   type WorkScheduleMode
 } from '../../models/work-schedule';
+
+type JiraConnectionForm = FormGroup<{
+  id: FormControl<string>;
+  name: FormControl<string>;
+  type: FormControl<JiraDeployment>;
+  base_url: FormControl<string>;
+  project_key: FormControl<string>;
+  token: FormControl<string>;
+  email: FormControl<string>;
+}>;
+
+const DEFAULT_ONPREM_JIRA_URL = 'https://app-jira.corp.jyskebank.net/jira';
+
+function jiraConnectionsSnapshot(list: unknown): string {
+  const rows = Array.isArray(list) ? list as Array<Partial<JiraConnection>> : [];
+  return JSON.stringify(rows.map((c) => {
+    const type = c?.type === 'cloud' ? 'cloud' : 'server';
+    return [
+      String(c?.id ?? ''),
+      String(c?.name ?? '').trim(),
+      type,
+      String(c?.base_url ?? '').trim().replace(/\/+$/, ''),
+      String(c?.project_key ?? '').trim().toUpperCase(),
+      String(c?.token ?? '').trim(),
+      type === 'cloud' ? String(c?.email ?? '').trim() : ''
+    ];
+  }));
+}
 
 @Component({
   selector: 'settings-view',
@@ -57,8 +86,8 @@ export class SettingsComponent {
     weekday_6: false,
     azure_tenant_id: '',
     azure_client_id: '',
-    jira_psa_key: '',
-    jira_project_key: '',
+    jira_active_connection_id: '',
+    jira_connections: new FormArray<JiraConnectionForm>([]),
     auto_focus_on_slot: false,
     notification_silent: true,
     stale_threshold_minutes: 45,
@@ -68,6 +97,7 @@ export class SettingsComponent {
     island_os_notifications: false,
     jira_log_on_afstem: false
   });
+  readonly jiraConnections = this.settingsForm.controls.jira_connections;
 
   private settingsValue = toSignal(this.settingsForm.valueChanges, {
     initialValue: this.settingsForm.getRawValue()
@@ -87,8 +117,8 @@ export class SettingsComponent {
   authBusy = signal<boolean>(false);
   authError = signal<string>('');
   authStatus = this.ipc.authStatus;
-  jiraVerifyBusy = signal<boolean>(false);
-  jiraVerifyResult = signal<{ ok: boolean; displayName?: string; emailAddress?: string; accountId?: string; error?: string } | null>(null);
+  jiraVerifyBusyIds = signal<ReadonlySet<string>>(new Set());
+  jiraVerifyResults = signal<Readonly<Record<string, JiraIdentityResult>>>({});
   private autoJiraVerifyAttempted = false;
   saveToast = signal<{ message: string; kind: 'success' | 'error' } | null>(null);
   private saveToastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -110,10 +140,9 @@ export class SettingsComponent {
     return this.weekdayControlNames.map(name => !!v[name]);
   });
 
-  jiraSettingsConfigured = computed(() => {
-    const v = this.settingsValue();
-    return !!String(v.jira_psa_key ?? '').trim() && !!String(v.jira_project_key ?? '').trim();
-  });
+  hasUsableJiraConnection = computed(() =>
+    (this.settingsValue().jira_connections ?? []).some((c) => isJiraConnectionUsable(c))
+  );
 
   // Derived signals
   totalWorkMinutes = computed(() => {
@@ -144,8 +173,8 @@ export class SettingsComponent {
         (v.work_schedule_mode === 'weekly' && !schedulesEqual(normalizeWorkSchedule(s.work_schedule), this.workSchedule())) ||
         ((s.azure_tenant_id ?? '') !== (v.azure_tenant_id ?? '')) ||
         ((s.azure_client_id ?? '') !== (v.azure_client_id ?? '')) ||
-        ((s.jira_psa_key ?? '') !== (v.jira_psa_key ?? '')) ||
-        ((s.jira_project_key ?? '') !== (v.jira_project_key ?? '')) ||
+        ((s.jira_active_connection_id ?? '') !== (v.jira_active_connection_id ?? '')) ||
+        (jiraConnectionsSnapshot(s.jira_connections) !== jiraConnectionsSnapshot(v.jira_connections)) ||
         (!!s.auto_focus_on_slot !== !!v.auto_focus_on_slot) ||
         (!!s.notification_silent !== !!v.notification_silent) ||
         (Number(s.stale_threshold_minutes) !== Number(v.stale_threshold_minutes)) ||
@@ -168,20 +197,20 @@ export class SettingsComponent {
         this.initialSettings.set(v);
       }
 
-      // Show linked Jira account automatically when Jira settings already exist.
+      // Show linked Jira accounts automatically when connections already exist.
       if (v && !this.autoJiraVerifyAttempted) {
-        const hasPsa = !!String(v.jira_psa_key ?? '').trim();
-        const hasProject = !!String(v.jira_project_key ?? '').trim();
-        if (hasPsa && hasProject) {
-          this.autoJiraVerifyAttempted = true;
-          void this.verifyJiraIdentity();
-        }
+        this.autoJiraVerifyAttempted = true;
+        this.verifyAllJiraConnections();
       }
     });
   }
 
   apply(s: any) {
     this.workSchedule.set(normalizeWorkSchedule(s.work_schedule));
+    this.jiraConnections.clear({ emitEvent: false });
+    for (const c of Array.isArray(s.jira_connections) ? s.jira_connections : []) {
+      this.jiraConnections.push(this.createJiraConnectionGroup(c), { emitEvent: false });
+    }
     this.settingsForm.patchValue({
       work_schedule_mode: s.work_schedule_mode === 'weekly' ? 'weekly' : 'interval',
       work_start: s.work_start,
@@ -196,8 +225,7 @@ export class SettingsComponent {
       weekday_6: (s.weekdays_mask & (1 << 6)) !== 0,
       azure_tenant_id: s.azure_tenant_id ?? '',
       azure_client_id: s.azure_client_id ?? '',
-      jira_psa_key: s.jira_psa_key ?? '',
-      jira_project_key: s.jira_project_key ?? '',
+      jira_active_connection_id: s.jira_active_connection_id ?? '',
       auto_focus_on_slot: !!s.auto_focus_on_slot,
       notification_silent: !!s.notification_silent,
       stale_threshold_minutes: Number(s.stale_threshold_minutes) || 45,
@@ -221,8 +249,16 @@ export class SettingsComponent {
       work_schedule: this.workSchedule(),
       azure_tenant_id: raw.azure_tenant_id.trim(),
       azure_client_id: raw.azure_client_id.trim(),
-      jira_psa_key: raw.jira_psa_key.trim(),
-      jira_project_key: raw.jira_project_key.trim().toUpperCase(),
+      jira_connections: raw.jira_connections.map((c) => ({
+        id: c.id,
+        name: c.name.trim(),
+        type: c.type,
+        base_url: c.base_url.trim(),
+        project_key: c.project_key.trim().toUpperCase(),
+        token: c.token.trim(),
+        email: c.type === 'cloud' ? c.email.trim() : ''
+      })),
+      jira_active_connection_id: raw.jira_active_connection_id,
       auto_focus_on_slot: raw.auto_focus_on_slot,
       notification_silent: raw.notification_silent,
       stale_threshold_minutes: Number(raw.stale_threshold_minutes),
@@ -238,11 +274,8 @@ export class SettingsComponent {
       const persisted = resp?.settings ?? payload;
       this.apply(persisted);
       this.initialSettings.set(persisted);
-      if (payload.jira_psa_key && payload.jira_project_key) {
-        await this.verifyJiraIdentity(payload.jira_psa_key);
-      } else {
-        this.jiraVerifyResult.set(null);
-      }
+      this.jiraVerifyResults.set({});
+      this.verifyAllJiraConnections();
       this.showSaveToast('Indstillinger gemt.', 'success');
       return true;
     } catch {
@@ -393,25 +426,76 @@ export class SettingsComponent {
 
   clearImport() { this.importText.set(''); this.importResult.set(null); }
 
-  async verifyJiraIdentity(psaKeyOverride?: string) {
-    const raw = this.settingsForm.getRawValue();
-    const psaKey = String(psaKeyOverride ?? raw.jira_psa_key ?? '').trim();
-    const projectKey = String(raw.jira_project_key ?? '').trim();
-    this.jiraVerifyResult.set(null);
-    if (!psaKey || !projectKey) {
-      this.jiraVerifyResult.set({ ok: false, error: 'Udfyld både Jira PSA key og Jira project key.' });
+  private createJiraConnectionGroup(c: Partial<JiraConnection> = {}): JiraConnectionForm {
+    return this.fb.nonNullable.group({
+      id: c.id || crypto.randomUUID(),
+      name: c.name ?? '',
+      type: (c.type === 'cloud' ? 'cloud' : 'server') as JiraDeployment,
+      base_url: c.base_url ?? '',
+      project_key: c.project_key ?? '',
+      token: c.token ?? '',
+      email: c.email ?? ''
+    });
+  }
+
+  addJiraConnection(type: JiraDeployment) {
+    const existing = this.jiraConnections.getRawValue();
+    const group = this.createJiraConnectionGroup({
+      type,
+      name: type === 'cloud' ? 'Jira Cloud' : 'Jira On-Premise',
+      base_url: type === 'server' ? DEFAULT_ONPREM_JIRA_URL : '',
+      project_key: existing[0]?.project_key ?? ''
+    });
+    this.jiraConnections.push(group);
+    if (!this.settingsForm.controls.jira_active_connection_id.value) {
+      this.settingsForm.controls.jira_active_connection_id.setValue(group.controls.id.value);
+    }
+  }
+
+  removeJiraConnection(index: number) {
+    const removedId = this.jiraConnections.at(index)?.controls.id.value;
+    this.jiraConnections.removeAt(index);
+    const activeCtrl = this.settingsForm.controls.jira_active_connection_id;
+    if (activeCtrl.value === removedId) {
+      activeCtrl.setValue(this.jiraConnections.at(0)?.controls.id.value ?? '');
+    }
+  }
+
+  isJiraVerifyBusy(id: string): boolean {
+    return this.jiraVerifyBusyIds().has(id);
+  }
+
+  private verifyAllJiraConnections() {
+    for (const c of this.jiraConnections.getRawValue()) {
+      if (isJiraConnectionUsable(c)) void this.verifyJiraConnection(c.id);
+    }
+  }
+
+  async verifyJiraConnection(id: string) {
+    const connection = this.jiraConnections.getRawValue().find((c) => c.id === id);
+    if (!connection) return;
+    if (!isJiraConnectionUsable(connection)) {
+      const missing = connection.type === 'cloud' ? 'URL, email og API token' : 'URL og PSA key';
+      this.setJiraVerifyResult(id, { ok: false, error: `Udfyld ${missing}.` });
       return;
     }
 
-    this.jiraVerifyBusy.set(true);
+    this.jiraVerifyBusyIds.update((ids) => new Set(ids).add(id));
     try {
-      const resp = await this.ipc.verifyJiraIdentity(psaKey);
-      this.jiraVerifyResult.set(resp);
+      this.setJiraVerifyResult(id, await this.ipc.verifyJiraIdentity(connection));
     } catch (err) {
-      this.jiraVerifyResult.set({ ok: false, error: String(err) });
+      this.setJiraVerifyResult(id, { ok: false, error: String(err) });
     } finally {
-      this.jiraVerifyBusy.set(false);
+      this.jiraVerifyBusyIds.update((ids) => {
+        const next = new Set(ids);
+        next.delete(id);
+        return next;
+      });
     }
+  }
+
+  private setJiraVerifyResult(id: string, result: JiraIdentityResult) {
+    this.jiraVerifyResults.update((all) => ({ ...all, [id]: result }));
   }
 
   requestLeaveConfirmation(): boolean | Promise<boolean> {

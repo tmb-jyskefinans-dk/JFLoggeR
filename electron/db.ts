@@ -10,6 +10,13 @@ import {
   type WorkSchedule,
   type WorkScheduleMode
 } from './work-schedule';
+import {
+  LEGACY_ONPREM_CONNECTION_ID,
+  migrateLegacyJiraSettings,
+  normalizeActiveJiraConnectionId,
+  normalizeJiraConnections,
+  type JiraConnection
+} from './jira-client';
 
 export type Entry = {
   id?: number;          // not used but kept for compatibility with older code
@@ -37,8 +44,8 @@ export type Settings = {
   auto_start_on_login?: boolean; // launch app on OS login
   group_notifications?: boolean; // consolidate missed notifications when away
   minimize_after_notification_submit?: boolean; // minimize app after logging from notification-opened dialog
-  jira_psa_key?: string; // Jira PSA key for API access
-  jira_project_key?: string; // Jira project key for autocomplete queries
+  jira_connections?: JiraConnection[]; // configured Jira instances (on-prem and/or cloud)
+  jira_active_connection_id?: string; // connection used for search and worklogs
   jira_log_on_afstem?: boolean; // automatically post Jira worklogs when marking a day as afstemt
   window_mode?: 'docked' | 'detached'; // last used window mode, restored on startup
   detached_bounds?: { x: number; y: number; width: number; height: number } | null;
@@ -52,6 +59,7 @@ export type JiraLoggedWorklog = {
   seconds: number;
   started?: string;
   logged_at?: string;
+  connection_id?: string; // Jira connection the worklog was created on
 };
 
 type Data = {
@@ -77,8 +85,8 @@ const DEFAULT_SETTINGS: Settings = {
   auto_start_on_login: false,
   group_notifications: true,
   minimize_after_notification_submit: false,
-  jira_psa_key: '',
-  jira_project_key: '',
+  jira_connections: [],
+  jira_active_connection_id: '',
   jira_log_on_afstem: false,
   window_mode: 'docked',
   detached_bounds: null,
@@ -160,8 +168,18 @@ export function initDb() {
     if (typeof db.data.settings.auto_start_on_login !== 'boolean') { db.data.settings.auto_start_on_login = DEFAULT_SETTINGS.auto_start_on_login!; changed = true; }
     if (typeof db.data.settings.group_notifications !== 'boolean') { db.data.settings.group_notifications = DEFAULT_SETTINGS.group_notifications!; changed = true; }
     if (typeof db.data.settings.minimize_after_notification_submit !== 'boolean') { db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit!; changed = true; }
-    if (typeof db.data.settings.jira_psa_key !== 'string') { db.data.settings.jira_psa_key = DEFAULT_SETTINGS.jira_psa_key!; changed = true; }
-    if (typeof db.data.settings.jira_project_key !== 'string') { db.data.settings.jira_project_key = DEFAULT_SETTINGS.jira_project_key!; changed = true; }
+    const legacyJira = db.data.settings as Settings & { jira_psa_key?: unknown; jira_project_key?: unknown };
+    if (!Array.isArray(legacyJira.jira_connections)) {
+      legacyJira.jira_connections = migrateLegacyJiraSettings(legacyJira);
+      changed = true;
+    }
+    if ('jira_psa_key' in legacyJira || 'jira_project_key' in legacyJira) {
+      delete legacyJira.jira_psa_key;
+      delete legacyJira.jira_project_key;
+      changed = true;
+    }
+    const activeJiraId = normalizeActiveJiraConnectionId(legacyJira.jira_connections, legacyJira.jira_active_connection_id);
+    if (legacyJira.jira_active_connection_id !== activeJiraId) { legacyJira.jira_active_connection_id = activeJiraId; changed = true; }
     if (typeof db.data.settings.jira_log_on_afstem !== 'boolean') { db.data.settings.jira_log_on_afstem = DEFAULT_SETTINGS.jira_log_on_afstem!; changed = true; }
     if (db.data.settings.window_mode !== 'docked' && db.data.settings.window_mode !== 'detached') { db.data.settings.window_mode = DEFAULT_SETTINGS.window_mode; changed = true; }
     if (db.data.settings.detached_bounds === undefined) { db.data.settings.detached_bounds = null; changed = true; }
@@ -185,6 +203,9 @@ export function saveSettings(s: Settings) {
   ensureDb();
   db.read();
   const prev = db.data!.settings;
+  const jiraConnections = s.jira_connections !== undefined
+    ? normalizeJiraConnections(s.jira_connections)
+    : normalizeJiraConnections(prev?.jira_connections);
   db.data!.settings = {
     work_start: s.work_start,
     work_end: s.work_end,
@@ -203,8 +224,8 @@ export function saveSettings(s: Settings) {
     auto_start_on_login: !!s.auto_start_on_login,
     group_notifications: !!s.group_notifications,
     minimize_after_notification_submit: !!s.minimize_after_notification_submit,
-    jira_psa_key: String(s.jira_psa_key ?? '').trim(),
-    jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase(),
+    jira_connections: jiraConnections,
+    jira_active_connection_id: normalizeActiveJiraConnectionId(jiraConnections, s.jira_active_connection_id ?? prev?.jira_active_connection_id),
     jira_log_on_afstem: !!s.jira_log_on_afstem,
     // Window state is owned by the main process; keep it unless explicitly provided.
     window_mode: s.window_mode === 'detached' || s.window_mode === 'docked' ? s.window_mode : (prev?.window_mode ?? 'docked'),
@@ -377,7 +398,9 @@ export function getJiraLoggedWorklogs(day: string): JiraLoggedWorklog[] {
       worklogId: String(r.worklogId).trim(),
       seconds: Number(r.seconds) || 0,
       started: typeof r.started === 'string' ? r.started : undefined,
-      logged_at: typeof r.logged_at === 'string' ? r.logged_at : undefined
+      logged_at: typeof r.logged_at === 'string' ? r.logged_at : undefined,
+      // Rows logged before multi-connection support were always on-prem.
+      connection_id: typeof r.connection_id === 'string' && r.connection_id ? r.connection_id : LEGACY_ONPREM_CONNECTION_ID
     }))
     .filter((r) => !!r.key && !!r.worklogId);
 }
@@ -393,7 +416,8 @@ export function setJiraLoggedWorklogs(day: string, worklogs: JiraLoggedWorklog[]
       worklogId: String(r.worklogId).trim(),
       seconds: Number(r.seconds) || 0,
       started: typeof r.started === 'string' ? r.started : undefined,
-      logged_at: typeof r.logged_at === 'string' ? r.logged_at : new Date().toISOString()
+      logged_at: typeof r.logged_at === 'string' ? r.logged_at : new Date().toISOString(),
+      connection_id: typeof r.connection_id === 'string' && r.connection_id ? r.connection_id : LEGACY_ONPREM_CONNECTION_ID
     }))
     .filter((r) => !!r.key && !!r.worklogId);
   db.data!.jira_logged_worklogs[day] = normalized;

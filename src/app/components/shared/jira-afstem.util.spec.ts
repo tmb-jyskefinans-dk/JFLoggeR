@@ -1,10 +1,14 @@
 import { getJiraAfstemRows, isJiraAfstemRow, shouldJiraAutoLogOnAfstem } from './jira-afstem.util';
 
 describe('jira-afstem.util', () => {
-  test('enables Jira auto-log only when both setting and psa key are present', () => {
-    expect(shouldJiraAutoLogOnAfstem({ jira_log_on_afstem: true, jira_psa_key: 'abc' })).toBe(true);
-    expect(shouldJiraAutoLogOnAfstem({ jira_log_on_afstem: true, jira_psa_key: '' })).toBe(false);
-    expect(shouldJiraAutoLogOnAfstem({ jira_log_on_afstem: false, jira_psa_key: 'abc' })).toBe(false);
+  test('enables Jira auto-log only when setting is on and the active connection is usable', () => {
+    const onprem = { id: 'a', type: 'server', base_url: 'https://jira.local/jira', token: 'abc' };
+    const cloud = { id: 'b', type: 'cloud', base_url: 'https://x.atlassian.net', token: 'abc', email: '' };
+    const settings = (active: string, on = true) => ({ jira_log_on_afstem: on, jira_connections: [onprem, cloud], jira_active_connection_id: active });
+    expect(shouldJiraAutoLogOnAfstem(settings('a'))).toBe(true);
+    expect(shouldJiraAutoLogOnAfstem(settings('a', false))).toBe(false);
+    expect(shouldJiraAutoLogOnAfstem(settings('b'))).toBe(false);
+    expect(shouldJiraAutoLogOnAfstem(settings('missing'))).toBe(false);
   });
 
   test('matches only Jira-key rows in allowed categories', () => {

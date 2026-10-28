@@ -132,45 +132,114 @@
       </section>
 
       <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
-        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Jira og Afstem</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div class="flex flex-col gap-1">
-            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira project key</label>
-            <input type="text" formControlName="jira_project_key" placeholder="fx TEAMJYFWEB"
-              class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-            <p class="text-xs text-slate-500 dark:text-slate-400">Bruges i JQL-filteret for autocomplete under Udvikling Projekter.</p>
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Jira PSA key</label>
-            <input type="password" formControlName="jira_psa_key" placeholder="Indsæt PSA key"
-              class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-            <p class="text-xs text-slate-500 dark:text-slate-400">Bruges som <strong>Bearer</strong> token mod Jira API for forslag.</p>
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Jira og Afstem</h3>
+          <div class="flex gap-2">
+            <button type="button" (click)="addJiraConnection('server')"
+              class="inline-flex items-center justify-center rounded-md text-xs font-medium px-3 h-8 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">+ On-Premise</button>
+            <button type="button" (click)="addJiraConnection('cloud')"
+              class="inline-flex items-center justify-center rounded-md text-xs font-medium px-3 h-8 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">+ Cloud</button>
           </div>
         </div>
-        @if(jiraSettingsConfigured()) {
-          <div class="mt-3 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-3">
-            <div class="flex flex-wrap items-center gap-2">
-              <button type="button" (click)="verifyJiraIdentity()" [disabled]="jiraVerifyBusy()"
-                class="inline-flex items-center justify-center rounded-md text-xs font-semibold px-3 h-8 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">
-                {{ jiraVerifyBusy() ? 'Verificerer...' : 'Verificer Jira PSA-link' }}
-              </button>
-              @if(jiraVerifyResult()?.ok) {
-                <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300">PSA key er verificeret.</span>
-              } @else if (jiraVerifyResult() && !jiraVerifyResult()?.ok) {
-                <span class="text-xs font-medium text-rose-700 dark:text-rose-300">{{jiraVerifyResult()?.error}}</span>
-              }
-            </div>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Den <strong>aktive</strong> forbindelse bruges til Jira-forslag og til at logge arbejdstid. Worklogs fjernes altid fra den Jira-instans, de blev oprettet på, så slet ikke en forbindelse før afstemte dage på den er håndteret.</p>
 
-            @if(jiraVerifyResult()?.ok) {
-              <div class="mt-2 text-xs text-slate-600 dark:text-slate-300 grid grid-cols-1 md:grid-cols-2 gap-1">
-                <div><strong>Navn:</strong> {{jiraVerifyResult()?.displayName || 'Ukendt'}}</div>
-                <div><strong>Email:</strong> {{jiraVerifyResult()?.emailAddress || 'Ikke oplyst'}}</div>
-                <div class="md:col-span-2"><strong>Jira bruger-id:</strong> <span class="font-mono">{{jiraVerifyResult()?.accountId || 'Ukendt'}}</span></div>
-              </div>
-            }
-          </div>
+        @if(!jiraConnections.length) {
+          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">Ingen Jira-forbindelser. Tilføj en On-Premise eller Cloud forbindelse.</p>
         }
-        @if(settingsForm.controls.jira_psa_key.value) {
+
+        <div formArrayName="jira_connections" class="mt-3 space-y-3">
+          @for(group of jiraConnections.controls; track group; let i = $index) {
+            @let id = group.controls.id.value;
+            @let isCloud = group.controls.type.value === 'cloud';
+            @let verify = jiraVerifyResults()[id];
+            <fieldset [formGroupName]="i" class="rounded-md border p-3"
+              [class]="settingsForm.controls.jira_active_connection_id.value === id ? 'border-indigo-400 dark:border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20' : 'border-slate-200 dark:border-slate-700'">
+              <legend class="sr-only">{{group.controls.name.value || 'Jira-forbindelse'}}</legend>
+              <div class="flex flex-wrap items-center gap-3 mb-3">
+                <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                  <input type="radio" name="jira_active_connection" [value]="id" [formControl]="settingsForm.controls.jira_active_connection_id"
+                    class="h-4 w-4 border-slate-300 dark:border-slate-600 focus:ring-indigo-500" />
+                  Aktiv
+                </label>
+                <span class="rounded px-2 py-0.5 text-[11px] font-semibold"
+                  [class]="isCloud ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'">
+                  {{ isCloud ? 'Cloud' : 'On-Premise' }}
+                </span>
+                <button type="button" (click)="removeJiraConnection(i)"
+                  class="ml-auto text-xs font-medium text-rose-700 hover:underline dark:text-rose-300"
+                  [attr.aria-label]="'Fjern ' + (group.controls.name.value || 'Jira-forbindelse')">Fjern</button>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+                  Navn
+                  <input type="text" formControlName="name" placeholder="fx Jira Cloud"
+                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+                </label>
+                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+                  Type
+                  <select formControlName="type"
+                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400">
+                    <option value="server">On-Premise (Server / Data Center)</option>
+                    <option value="cloud">Cloud (atlassian.net)</option>
+                  </select>
+                </label>
+                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+                  Jira URL
+                  <input type="url" formControlName="base_url" [placeholder]="isCloud ? 'https://firma.atlassian.net' : 'https://app-jira.corp.jyskebank.net/jira'"
+                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+                </label>
+                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+                  Jira project key
+                  <input type="text" formControlName="project_key" placeholder="fx TEAMJYFWEB"
+                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+                  <span class="text-xs font-normal text-slate-500 dark:text-slate-400">Bruges i JQL-filteret for autocomplete under Udvikling Projekter.</span>
+                </label>
+                @if(isCloud) {
+                  <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+                    Atlassian email
+                    <input type="email" formControlName="email" placeholder="navn@firma.dk" autocomplete="off"
+                      class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+                  </label>
+                }
+                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+                  {{ isCloud ? 'API token' : 'Jira PSA key' }}
+                  <input type="password" formControlName="token" [placeholder]="isCloud ? 'Indsæt Atlassian API token' : 'Indsæt PSA key'" autocomplete="off"
+                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+                  <span class="text-xs font-normal text-slate-500 dark:text-slate-400">
+                    @if(isCloud) {
+                      Opret et API token på id.atlassian.com. Bruges sammen med email som <strong>Basic</strong> auth.
+                      Ved et <strong>scoped</strong> token skal URL være <span class="font-mono">https://api.atlassian.com/ex/jira/&lt;cloudId&gt;</span>.
+                    } @else {
+                      Bruges som <strong>Bearer</strong> token mod Jira API.
+                    }
+                  </span>
+                </label>
+              </div>
+
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button type="button" (click)="verifyJiraConnection(id)" [disabled]="isJiraVerifyBusy(id)"
+                  class="inline-flex items-center justify-center rounded-md text-xs font-semibold px-3 h-8 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">
+                  {{ isJiraVerifyBusy(id) ? 'Verificerer...' : 'Verificer forbindelse' }}
+                </button>
+                @if(verify?.ok) {
+                  <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300">Forbindelsen er verificeret.</span>
+                } @else if (verify && !verify.ok) {
+                  <span class="text-xs font-medium text-rose-700 dark:text-rose-300">{{verify.error}}</span>
+                }
+              </div>
+              @if(verify?.ok) {
+                <div class="mt-2 text-xs text-slate-600 dark:text-slate-300 grid grid-cols-1 md:grid-cols-2 gap-1">
+                  <div><strong>Navn:</strong> {{verify?.displayName || 'Ukendt'}}</div>
+                  <div><strong>Email:</strong> {{verify?.emailAddress || 'Ikke oplyst'}}</div>
+                  <div class="md:col-span-2"><strong>Jira bruger-id:</strong> <span class="font-mono">{{verify?.accountId || 'Ukendt'}}</span></div>
+                </div>
+              }
+            </fieldset>
+          }
+        </div>
+
+        @if(hasUsableJiraConnection()) {
           <div class="flex items-start gap-3 mt-3">
             <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
               <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="jira_log_on_afstem" aria-describedby="jira-log-afstem-help">

@@ -6,7 +6,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { getCategoryColor } from '../../models/category-colors';
 import { ExportService } from '../../services/export.service';
-import { getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
+import { getActiveJiraConnection, getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
 import { SnackbarService } from '../../services/snackbar.service';
 
 @Component({
@@ -38,6 +38,7 @@ export class SummaryViewComponent implements AfterViewInit, OnDestroy  {
   jiraUnsetError = signal('');
   jiraUnsetPreviewLoading = signal(false);
   jiraUnsetPreviewRows = signal<Array<{ key: string; summary: string; minutes: number; startedLabel: string }>>([]);
+  jiraConnectionName = computed(() => String(getActiveJiraConnection(this.ipc.settings())?.name ?? ''));
 
   rows = computed<SummaryRow[]>(() => this.ipc.summary());
   totalSlots = computed(() => this.rows().reduce((a, r) => a + r.slots, 0));

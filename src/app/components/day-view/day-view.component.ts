@@ -5,7 +5,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { IpcService } from '../../services/ipc.service';
 import { ClockService } from '../../services/clock.service';
-import { getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
+import { getActiveJiraConnection, getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
 import { SnackbarService } from '../../services/snackbar.service';
 import {
   effectiveSlotMinutes,
@@ -43,6 +43,7 @@ export class DayViewComponent implements OnDestroy {
   archiveJiraUnsetConfirmError = signal('');
   archiveJiraUnsetPreviewLoading = signal(false);
   archiveJiraUnsetPreviewRows = signal<Array<{ key: string; summary: string; minutes: number; startedLabel: string }>>([]);
+  jiraConnectionName = computed(() => String(getActiveJiraConnection(this.ipc.settings())?.name ?? ''));
 
   archiveJiraKey(description: string): string {
     return String(description ?? '').match(/^([A-Z]+-\d+)/)?.[1] ?? '';

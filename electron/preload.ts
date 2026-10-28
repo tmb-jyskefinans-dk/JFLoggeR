@@ -30,7 +30,7 @@ contextBridge.exposeInMainWorld('workApi', {
   jiraLogWorklog: (day: string) => ipcRenderer.invoke('jira:log-worklog', { day }),
   jiraGetLoggedWorklogs: (day: string) => ipcRenderer.invoke('jira:get-logged-worklogs', { day }),
   jiraUnsetAfstemt: (day: string) => ipcRenderer.invoke('jira:unset-afstemt', { day }),
-  jiraVerifyIdentity: (payload?: { psaKey?: string }) => ipcRenderer.invoke('jira:verify-identity', payload ?? {}),
+  jiraVerifyIdentity: (payload?: { connection?: unknown }) => ipcRenderer.invoke('jira:verify-identity', payload ?? {}),
 
   // Events from main (notifications clicked)
   onPrompt: (cb: (d: any) => void) => {

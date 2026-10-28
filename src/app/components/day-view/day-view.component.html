@@ -225,7 +225,7 @@
 @if(archiveJiraConfirmOpen()) {
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="archiveJiraConfirmTitle" (keydown.escape)="closeArchiveJiraConfirm()">
     <div class="w-full max-w-lg rounded-xl border border-slate-200 dark:border-slate-600 shadow-xl bg-white dark:bg-slate-800 p-6 flex flex-col gap-4">
-      <h3 id="archiveJiraConfirmTitle" class="text-lg font-semibold text-slate-900 dark:text-slate-100">Log tid til Jira</h3>
+      <h3 id="archiveJiraConfirmTitle" class="text-lg font-semibold text-slate-900 dark:text-slate-100">Log tid til {{ jiraConnectionName() || 'Jira' }}</h3>
       @if(archiveJiraConfirmLoading()) {
         <p class="text-sm text-slate-500 dark:text-slate-400">Henter preview...</p>
       } @else {

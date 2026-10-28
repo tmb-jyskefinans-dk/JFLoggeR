@@ -27,15 +27,28 @@ function writeLog(level: string, message: string, meta?: any) {
   } catch (e) { /* last-chance; avoid throwing in logger */ }
 }
 
-const CORPORATE_JIRA_ORIGIN = 'https://app-jira.corp.jyskebank.net';
+// On-prem Jira uses a corporate CA that Node does not trust; Cloud uses normal TLS verification.
 const corporateJiraAgent = new https.Agent({ rejectUnauthorized: false });
 
-function fetchCorporateJiraJson(url: string, headers: Record<string, string>) {
-  return new Promise<{ status: number; ok: boolean; json: () => Promise<unknown> }>((resolve, reject) => {
+type JiraHttpResponse = { status: number; ok: boolean; json: () => Promise<unknown> };
+
+function jiraRequest(
+  connection: JiraConnection,
+  method: 'GET' | 'POST' | 'DELETE',
+  url: string,
+  body?: unknown
+) {
+  return new Promise<JiraHttpResponse>((resolve, reject) => {
+    const bodyStr = body === undefined ? undefined : JSON.stringify(body);
+    const headers: Record<string, string | number> = { ...jiraAuthHeaders(connection) };
+    if (bodyStr !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    }
     const req = https.request(url, {
-      method: 'GET',
+      method,
       headers,
-      agent: corporateJiraAgent
+      agent: connection.type === 'server' ? corporateJiraAgent : undefined
     }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
@@ -50,6 +63,7 @@ function fetchCorporateJiraJson(url: string, headers: Record<string, string>) {
       });
     });
     req.on('error', reject);
+    if (bodyStr !== undefined) req.write(bodyStr);
     req.end();
   });
 }
@@ -147,6 +161,19 @@ import {
 } from './time';
 import { usesWeeklySchedule } from './work-schedule';
 import { JiraApiIssue, mapAndRankJiraIssues } from './jira-search';
+import {
+  JiraConnection,
+  buildJiraMyselfUrl,
+  buildJiraSearchUrl,
+  buildJiraWorklogBody,
+  buildJiraWorklogUrl,
+  describeJiraHttpError,
+  jiraAuthHeaders,
+  jiraConnectionMissingConfig,
+  jiraUserIdFromMyself,
+  normalizeJiraConnection,
+  resolveJiraConnection
+} from './jira-client';
 
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
@@ -223,7 +250,7 @@ let staleCheckHandle: NodeJS.Timeout | null = null;
 let lastStaleNotifiedKey: string | null = null;
 let digestQueue: Date[] = []; // slots accumulated while user away
 let lastEntryEndTime: Date | null = null; // for stale detection heuristics
-let jiraMyselfCache: { psaKey: string; accountId?: string; displayName?: string; emailAddress?: string } | null = null;
+const jiraMyselfCache = new Map<string, { accountId?: string; displayName?: string; emailAddress?: string }>();
 let windowMode: WindowMode = 'compact';
 let expandedHeight = EXPANDED_DEFAULT_HEIGHT;
 let lastProgrammaticBoundsAt = 0;
@@ -247,42 +274,38 @@ type JiraResolvedIdentity = {
   emailAddress?: string;
 };
 
-async function resolveJiraIdentity(psaKey: string): Promise<JiraResolvedIdentity | undefined> {
-  if (!psaKey) return undefined;
-  if (jiraMyselfCache && jiraMyselfCache.psaKey === psaKey) {
-    return {
-      accountId: jiraMyselfCache.accountId,
-      displayName: jiraMyselfCache.displayName,
-      emailAddress: jiraMyselfCache.emailAddress
-    };
-  }
+function jiraIdentityCacheKey(c: JiraConnection): string {
+  return [c.type, c.base_url, c.email, c.token].join('|');
+}
+
+async function resolveJiraIdentity(connection: JiraConnection): Promise<JiraResolvedIdentity | undefined> {
+  if (jiraConnectionMissingConfig(connection)) return undefined;
+  const cacheKey = jiraIdentityCacheKey(connection);
+  const cached = jiraMyselfCache.get(cacheKey);
+  if (cached) return { ...cached };
 
   try {
-    const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/myself`;
-    const res = await fetchCorporateJiraJson(url, {
-      Accept: 'application/json',
-      Authorization: `Bearer ${psaKey}`
-    });
+    const res = await jiraRequest(connection, 'GET', buildJiraMyselfUrl(connection));
     if (!res.ok) {
-      jiraMyselfCache = { psaKey };
+      jiraMyselfCache.set(cacheKey, {});
       return undefined;
     }
 
     const data = await res.json() as JiraMyselfResponse;
-    const accountId = String(data.accountId ?? data.key ?? data.name ?? '').trim() || undefined;
+    const accountId = jiraUserIdFromMyself(connection, data);
     const displayName = String(data.displayName ?? '').trim() || undefined;
     const emailAddress = String(data.emailAddress ?? '').trim() || undefined;
-    jiraMyselfCache = { psaKey, accountId, displayName, emailAddress };
+    jiraMyselfCache.set(cacheKey, { accountId, displayName, emailAddress });
     return { accountId, displayName, emailAddress };
   } catch {
-    jiraMyselfCache = { psaKey };
+    jiraMyselfCache.set(cacheKey, {});
     return undefined;
   }
 }
 
-async function resolveJiraAccountId(psaKey: string): Promise<string | undefined> {
-  const identity = await resolveJiraIdentity(psaKey);
-  return identity?.accountId;
+function getActiveJiraConnection(): JiraConnection | undefined {
+  const settings = getSettings();
+  return resolveJiraConnection(settings.jira_connections, settings.jira_active_connection_id);
 }
 
 // Centralized helper to add a slot key to the pending set and notify renderer.
@@ -775,11 +798,12 @@ ipcMain.handle('jira:search-issues', async (_e, payload: { term?: string }) => {
     const term = String(payload?.term ?? '').trim();
     if (term.length < 2) return { ok: true, items: [] };
 
-    const settings = getSettings();
-    const psaKey = String(settings.jira_psa_key ?? '').trim();
-    const projectKey = String(settings.jira_project_key ?? '').trim().toUpperCase();
-    if (!psaKey || !projectKey) {
-      return { ok: false, error: 'Jira PSA key eller project key mangler i indstillinger.' };
+    const connection = getActiveJiraConnection();
+    const missing = jiraConnectionMissingConfig(connection);
+    if (missing || !connection) return { ok: false, error: missing ?? 'Jira er ikke konfigureret.' };
+    const projectKey = connection.project_key;
+    if (!projectKey) {
+      return { ok: false, error: `Jira project key mangler for "${connection.name}".` };
     }
     const escapedTerm = term.replace(/"/g, '\\"');
     const keyCandidate = term.toUpperCase().replace(/"/g, '\\"');
@@ -787,22 +811,16 @@ ipcMain.handle('jira:search-issues', async (_e, payload: { term?: string }) => {
     if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(term)) {
       clauses.unshift(`key = "${keyCandidate}"`);
     }
-    const query = encodeURIComponent(
-      `project = ${projectKey} AND (${clauses.join(' OR ')}) ORDER BY created DESC`
-    );
-
-    const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/search?jql=${query}&fields=key,summary,issuetype,assignee,reporter,customfield_10060&maxResults=10`;
-    const res = await fetchCorporateJiraJson(url, {
-      Accept: 'application/json',
-      Authorization: `Bearer ${psaKey}`
-    });
+    const jql = `project = "${projectKey}" AND (${clauses.join(' OR ')}) ORDER BY created DESC`;
+    const url = buildJiraSearchUrl(connection, jql, ['key', 'summary', 'issuetype', 'assignee', 'reporter', 'customfield_10060'], 10);
+    const res = await jiraRequest(connection, 'GET', url);
 
     if (!res.ok) {
       return { ok: false, error: `Jira opslag fejlede (${res.status}).` };
     }
 
     const data = await res.json() as { issues?: JiraApiIssue[] };
-    const currentAccountId = await resolveJiraAccountId(psaKey);
+    const currentAccountId = (await resolveJiraIdentity(connection))?.accountId;
     const items = mapAndRankJiraIssues(data.issues ?? [], term, currentAccountId);
 
     return { ok: true, items };
@@ -813,17 +831,20 @@ ipcMain.handle('jira:search-issues', async (_e, payload: { term?: string }) => {
   }
 });
 
-ipcMain.handle('jira:verify-identity', async (_e, payload?: { psaKey?: string }) => {
+ipcMain.handle('jira:verify-identity', async (_e, payload?: { connection?: unknown }) => {
   try {
-    const settings = getSettings();
-    const psaKey = String(payload?.psaKey ?? settings.jira_psa_key ?? '').trim();
-    if (!psaKey) {
-      return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+    // Settings UI may verify unsaved connection drafts.
+    const connection = payload?.connection !== undefined
+      ? normalizeJiraConnection(payload.connection) ?? undefined
+      : getActiveJiraConnection();
+    const missing = jiraConnectionMissingConfig(connection);
+    if (missing || !connection) {
+      return { ok: false, error: missing ?? 'Jira er ikke konfigureret.' };
     }
 
-    const identity = await resolveJiraIdentity(psaKey);
+    const identity = await resolveJiraIdentity(connection);
     if (!identity?.accountId) {
-      return { ok: false, error: 'PSA key kunne ikke verificeres mod Jira /myself.' };
+      return { ok: false, error: `Login kunne ikke verificeres mod Jira /myself (${connection.name}).` };
     }
 
     return {
@@ -844,56 +865,14 @@ const JIRA_WORKLOG_CATEGORIES = new Set([
   'Estimering'
 ]);
 
-function postCorporateJiraJson(url: string, headers: Record<string, string>, body: unknown) {
-  return new Promise<{ status: number; ok: boolean; json: () => Promise<unknown> }>((resolve, reject) => {
-    const bodyStr = JSON.stringify(body);
-    const req = https.request(url, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
-      agent: corporateJiraAgent
-    }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      res.on('end', () => {
-        const bodyText = Buffer.concat(chunks).toString('utf8');
-        const status = res.statusCode ?? 500;
-        resolve({ status, ok: status >= 200 && status < 300, json: async () => bodyText ? JSON.parse(bodyText) : {} });
-      });
-    });
-    req.on('error', reject);
-    req.write(bodyStr);
-    req.end();
-  });
-}
-
-function deleteCorporateJira(url: string, headers: Record<string, string>) {
-  return new Promise<{ status: number; ok: boolean; json: () => Promise<unknown> }>((resolve, reject) => {
-    const req = https.request(url, {
-      method: 'DELETE',
-      headers,
-      agent: corporateJiraAgent
-    }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      res.on('end', () => {
-        const bodyText = Buffer.concat(chunks).toString('utf8');
-        const status = res.statusCode ?? 500;
-        resolve({ status, ok: status >= 200 && status < 300, json: async () => bodyText ? JSON.parse(bodyText) : {} });
-      });
-    });
-    req.on('error', reject);
-    req.end();
-  });
-}
-
 ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
   try {
     const day = String(payload?.day ?? '').trim();
     if (!day) return { ok: false, error: 'Dag mangler.' };
 
-    const settings = getSettings();
-    const psaKey = String(settings.jira_psa_key ?? '').trim();
-    if (!psaKey) return { ok: false, error: 'Jira PSA key mangler i indstillinger.' };
+    const connection = getActiveJiraConnection();
+    const missing = jiraConnectionMissingConfig(connection);
+    if (missing || !connection) return { ok: false, error: missing ?? 'Jira er ikke konfigureret.' };
 
     const entries = getDayEntries(day).filter((e: any) => JIRA_WORKLOG_CATEGORIES.has(e.category));
     if (!entries.length) return { ok: true, results: [] };
@@ -920,9 +899,8 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
     if (!aggr.size) return { ok: true, results: [] };
 
     const [y, mo, d] = day.split('-').map(Number);
-    const authHeaders = { Accept: 'application/json', Authorization: `Bearer ${psaKey}` };
     const results: Array<{ key: string; seconds: number; success: boolean; worklogId?: string; error?: string }> = [];
-    const tracked: Array<{ key: string; worklogId: string; seconds: number; started: string; logged_at: string }> = [];
+    const tracked: Array<{ key: string; worklogId: string; seconds: number; started: string; logged_at: string; connection_id: string }> = [];
 
     for (const [key, { seconds, earliest }] of aggr) {
       try {
@@ -934,21 +912,22 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
         const tzH = pad2(Math.floor(Math.abs(tz) / 60));
         const tzM = pad2(Math.abs(tz) % 60);
         const startedStr = `${day}T${pad2(hh)}:${pad2(mm)}:00.000${tzSign}${tzH}${tzM}`;
-        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/issue/${key}/worklog`;
-        const res = await postCorporateJiraJson(url, authHeaders, {
-          timeSpentSeconds: seconds,
-          started: startedStr,
-          comment: 'Logged via JFLoggeR'
-        });
+        const res = await jiraRequest(
+          connection,
+          'POST',
+          buildJiraWorklogUrl(connection, key),
+          buildJiraWorklogBody(connection, seconds, startedStr, 'Logged via JFLoggeR')
+        );
         if (res.ok) {
           const body = await res.json() as { id?: unknown };
           const worklogId = String(body?.id ?? '').trim();
           results.push({ key, seconds, success: true, worklogId: worklogId || undefined });
           if (worklogId) {
-            tracked.push({ key, worklogId, seconds, started: startedStr, logged_at: new Date().toISOString() });
+            tracked.push({ key, worklogId, seconds, started: startedStr, logged_at: new Date().toISOString(), connection_id: connection.id });
           }
         } else {
-          results.push({ key, seconds, success: false, error: `HTTP ${res.status}` });
+          const body = await res.json().catch(() => undefined);
+          results.push({ key, seconds, success: false, error: describeJiraHttpError(res.status, body) });
         }
       } catch (e) {
         results.push({ key, seconds, success: false, error: String(e) });
@@ -958,8 +937,12 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
     if (tracked.length) setJiraLoggedWorklogs(day, tracked);
     else clearJiraLoggedWorklogs(day);
 
-    const allOk = results.every(r => r.success);
-    return { ok: allOk, results };
+    const failed = results.filter(r => !r.success);
+    if (failed.length) {
+      writeLog('warn', 'Jira worklog failed', { connection: connection.name, failed });
+      return { ok: false, results, error: failed.map(r => `${r.key}: ${r.error}`).join(' | ') };
+    }
+    return { ok: true, results };
   } catch (e) {
     logIpcFailure('jira:log-worklog', e);
     return { ok: false, error: 'Jira worklog fejlede.' };
@@ -978,29 +961,28 @@ ipcMain.handle('jira:unset-afstemt', async (_e, payload: { day: string }) => {
     }
 
     const settings = getSettings();
-    const psaKey = String(settings.jira_psa_key ?? '').trim();
-    if (!psaKey) {
-      return {
-        ok: false,
-        day,
-        exported: true,
-        error: 'Kan ikke fjerne Jira worklogs uden Jira PSA key i indstillinger.'
-      };
-    }
-
-    const authHeaders = { Accept: 'application/json', Authorization: `Bearer ${psaKey}` };
     const results: Array<{ key: string; worklogId: string; success: boolean; error?: string }> = [];
     const remaining: typeof tracked = [];
 
+    // Worklogs are deleted on the instance they were created on, regardless of the active connection.
     for (const row of tracked) {
+      const connection = resolveJiraConnection(settings.jira_connections, row.connection_id);
+      const missing = connection
+        ? jiraConnectionMissingConfig(connection)
+        : 'Jira-forbindelsen, som worklog blev oprettet på, findes ikke længere i indstillinger.';
+      if (missing || !connection) {
+        remaining.push(row);
+        results.push({ key: row.key, worklogId: row.worklogId, success: false, error: missing ?? undefined });
+        continue;
+      }
       try {
-        const url = `${CORPORATE_JIRA_ORIGIN}/jira/rest/api/2/issue/${row.key}/worklog/${row.worklogId}?adjustEstimate=leave`;
-        const res = await deleteCorporateJira(url, authHeaders);
+        const res = await jiraRequest(connection, 'DELETE', buildJiraWorklogUrl(connection, row.key, row.worklogId));
         if (res.ok || res.status === 404) {
           results.push({ key: row.key, worklogId: row.worklogId, success: true });
         } else {
           remaining.push(row);
-          results.push({ key: row.key, worklogId: row.worklogId, success: false, error: `HTTP ${res.status}` });
+          const body = await res.json().catch(() => undefined);
+          results.push({ key: row.key, worklogId: row.worklogId, success: false, error: describeJiraHttpError(res.status, body) });
         }
       } catch (e) {
         remaining.push(row);
@@ -1017,7 +999,7 @@ ipcMain.handle('jira:unset-afstemt', async (_e, payload: { day: string }) => {
         removed: tracked.length - remaining.length,
         total: tracked.length,
         results,
-        error: 'Kunne ikke fjerne alle Jira worklogs. Prøv igen.'
+        error: `Kunne ikke fjerne alle Jira worklogs. ${results.find((r) => !r.success)?.error ?? 'Prøv igen.'}`
       };
     }
 

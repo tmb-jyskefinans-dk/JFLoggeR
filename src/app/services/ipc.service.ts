@@ -67,6 +67,18 @@ export interface JiraIdentityResult {
   error?: string;
 }
 
+export type JiraDeployment = 'server' | 'cloud';
+
+export interface JiraConnection {
+  id: string;
+  name: string;
+  type: JiraDeployment;
+  base_url: string;
+  project_key: string;
+  token: string;
+  email: string;
+}
+
 export type WindowMode = 'compact' | 'expanded' | 'detached';
 export type PointerDragKind = 'move' | 'resize-e' | 'resize-s' | 'resize-se';
 export interface IslandPulse { kind: 'slot' | 'stale' | 'digest'; slot?: string; at: number; }
@@ -108,7 +120,7 @@ declare global {
       jiraLogWorklog?(day: string): Promise<JiraWorklogResult>;
       jiraGetLoggedWorklogs?(day: string): Promise<{ ok: boolean; items?: JiraLoggedWorklogPreview[]; error?: string }>;
       jiraUnsetAfstemt?(day: string): Promise<JiraUnsetAfstemtResult>;
-      jiraVerifyIdentity?(payload?: { psaKey?: string }): Promise<JiraIdentityResult>;
+      jiraVerifyIdentity?(payload?: { connection?: JiraConnection }): Promise<JiraIdentityResult>;
       getIslandMode?(): Promise<{ mode: string }>;
       setIslandMode?(mode: WindowMode, opts?: { focus?: boolean }): Promise<{ ok: boolean; mode: string }>;
       resizeIsland?(height: number): Promise<{ ok: boolean }>;
@@ -427,11 +439,11 @@ export class IpcService {
       });
   }
 
-  verifyJiraIdentity(psaKey?: string): Promise<JiraIdentityResult> {
+  verifyJiraIdentity(connection?: JiraConnection): Promise<JiraIdentityResult> {
     if (!window.workApi.jiraVerifyIdentity) {
       return Promise.resolve({ ok: false, error: 'Jira verifikation er ikke tilgængelig.' });
     }
-    return window.workApi.jiraVerifyIdentity({ psaKey })
+    return window.workApi.jiraVerifyIdentity(connection ? { connection } : {})
       .then((resp) => ({
         ok: !!resp?.ok,
         accountId: resp?.accountId,
