@@ -33,6 +33,8 @@ yarn-error.log
 /.angular/cache
 .sass-cache/
 /connect.lock
+# Local lock files resolve against the corporate Nexus proxy and break CI.
+/package-lock.json
 /coverage
 /libpeerconnection.log
 testem.log
