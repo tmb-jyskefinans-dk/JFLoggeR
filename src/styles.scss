@@ -25,42 +25,110 @@ html, body {
 	height: 100%;
 }
 
-/* Island theme tokens: light surfaces get a hairline outline instead of relying on contrast. */
+/* Jyske Bank CVI theme tokens (RGB channels so Tailwind alpha modifiers work).
+ * Neutrals: Sand + Grå 5/10/25/50 for light surfaces; warm charcoal darks for the dark theme.
+ * Accent: Mørkegrøn (#00422E) is the primary in both themes; dark mode uses Bladgrøn (accent-300) for text highlights. */
 :root {
-	--island-bg: #ffffff;
-	--island-fg: #0f172a;
-	--island-muted: rgb(15 23 42 / 0.55);
-	--island-subtle: rgb(15 23 42 / 0.06);
-	--island-subtle-strong: rgb(15 23 42 / 0.12);
-	--island-track: rgb(15 23 42 / 0.12);
-	--island-divider: rgb(226 232 240);
-	--island-outline: drop-shadow(0 0 0.6px rgb(15 23 42 / 0.55)) drop-shadow(0 1px 1px rgb(15 23 42 / 0.08));
-	--island-ring-color: #10b981;
-	--island-accent: #4f46e5;
-	--island-success: #047857;
-	--island-success-bg: rgb(16 185 129 / 0.14);
-	--island-pulse: #e0e7ff;
-	--island-pulse-stale: #fef3c7;
-	--island-active-bg: #0f172a;
-	--island-active-fg: #ffffff;
+        --slate-50: 250 246 240;   /* Sand */
+        --slate-100: 242 242 242;  /* Grå 5 */
+        --slate-200: 229 229 229;  /* Grå 10 */
+        --slate-300: 191 191 191;  /* Grå 25 */
+        --slate-400: 154 159 156;
+        --slate-500: 128 128 128;  /* Grå 50 */
+        --slate-600: 90 96 92;
+        --slate-700: 58 74 66;
+        --slate-800: 28 51 41;
+        --slate-900: 18 40 32;
+        --slate-950: 10 28 22;
+
+        --accent-50: 236 251 219;  /* Lysegrøn */
+        --accent-100: 221 243 198;
+        --accent-200: 196 230 158;
+        --accent-300: 160 209 105; /* Bladgrøn */
+        --accent-400: 107 174 132;
+        --accent-500: 61 133 108;  /* Mellemgrøn */
+        --accent-600: 0 66 46;     /* Mørkegrøn */
+        --accent-700: 0 50 35;
+        --accent-800: 0 38 26;
+        --accent-900: 0 26 18;
+        --accent-950: 0 15 10;
+
+        --focus-ring: rgb(var(--accent-500));
+
+        /* Category colours from the CVI secondary/tertiary (infographic) palette, tuned per theme for contrast. */
+        --cat-dev-project: #3D856C;   /* Mellemgrøn */
+        --cat-estimering: #A0D169;    /* Bladgrøn */
+        --cat-small-dev: #453987;     /* Mørkelilla */
+        --cat-support: #F77A5C;       /* Koral */
+        --cat-support-tfs: #80263B;   /* Bordeaux */
+        --cat-support-jyffi: #FFCF5F; /* Gul */
+        --cat-sparring: #61442F;      /* Brun */
+        --cat-external: #C3B092;      /* Guld */
+        --cat-agile: #B5B8F7;         /* Lavendel */
+        --cat-ops: #FFC6B2;           /* Fersken */
+        --cat-meetings: #00422E;      /* Mørkegrøn */
+        --cat-absence: #BFBFBF;       /* Grå 25 */
+        --cat-knowledge: #808080;     /* Grå 50 */
+        --cat-other: #9A9F9C;
+
+        --island-bg: #ffffff;
+        --island-fg: rgb(var(--slate-950));
+        --island-muted: rgb(var(--slate-950) / 0.58);
+        --island-subtle: rgb(var(--slate-950) / 0.06);
+        --island-subtle-strong: rgb(var(--slate-950) / 0.12);
+        --island-track: rgb(var(--slate-950) / 0.12);
+        --island-divider: rgb(var(--slate-200));
+        --island-outline: drop-shadow(0 0 0.6px rgb(var(--slate-950) / 0.55)) drop-shadow(0 1px 1px rgb(var(--slate-950) / 0.08));
+        --island-accent: #00422E;
+        --island-success: #3D856C;
+        --island-success-bg: rgb(61 133 108 / 0.14);
+        --island-pulse: #ECFBDB;
+        --island-pulse-stale: #FFEFC9;
+        --island-active-bg: #00422E;
+        --island-active-fg: #ffffff;
 }
 html.dark {
-	--island-bg: #000000;
-	--island-fg: #ffffff;
-	--island-muted: rgb(255 255 255 / 0.55);
-	--island-subtle: rgb(255 255 255 / 0.1);
-	--island-subtle-strong: rgb(255 255 255 / 0.18);
-	--island-track: rgb(255 255 255 / 0.14);
-	--island-divider: transparent;
-	--island-outline: none;
-	--island-ring-color: #34d399;
-	--island-accent: #a5b4fc;
-	--island-success: #6ee7b7;
-	--island-success-bg: rgb(16 185 129 / 0.16);
-	--island-pulse: #262626;
-	--island-pulse-stale: #3a2a08;
-	--island-active-bg: #ffffff;
-	--island-active-fg: #0f172a;
+        /* Warm charcoal neutrals (CVI Grå 75/Sort with a hint of Sand) so green stays an accent, not the surface. */
+        --slate-400: 163 160 155;
+        --slate-500: 128 128 128;  /* Grå 50 */
+        --slate-600: 92 90 86;
+        --slate-700: 64 62 59;     /* ≈ Grå 75 */
+        --slate-800: 33 32 30;
+        --slate-900: 24 23 22;
+        --slate-950: 16 15 14;
+
+        --focus-ring: rgb(var(--accent-300));
+
+        --cat-dev-project: #A0D169;   /* Bladgrøn */
+        --cat-estimering: #ECFBDB;    /* Lysegrøn */
+        --cat-small-dev: #B5B8F7;     /* Lavendel */
+        --cat-support: #F77A5C;       /* Koral */
+        --cat-support-tfs: #FFC6B2;   /* Fersken */
+        --cat-support-jyffi: #FFCF5F; /* Gul */
+        --cat-sparring: #C3B092;      /* Guld */
+        --cat-external: #FAE5DC;      /* Rosa */
+        --cat-agile: #EBECFA;         /* Himmelblå */
+        --cat-ops: #3D856C;           /* Mellemgrøn */
+        --cat-meetings: #BFBFBF;      /* Grå 25 */
+        --cat-absence: #808080;       /* Grå 50 */
+        --cat-knowledge: #FAF6F0;     /* Sand */
+        --cat-other: #5A605C;
+
+        --island-bg: #181716;
+        --island-fg: #ffffff;
+        --island-muted: rgb(255 255 255 / 0.62);
+        --island-subtle: rgb(255 255 255 / 0.1);
+        --island-subtle-strong: rgb(255 255 255 / 0.18);
+        --island-track: rgb(255 255 255 / 0.16);
+        --island-divider: transparent;
+        --island-outline: none;
+        --island-accent: #A0D169;
+        --island-success: #A0D169;
+        --island-success-bg: rgb(160 209 105 / 0.18);
+        --island-pulse: #00422E;      /* Mørkegrøn flash on new slot */
+        --island-pulse-stale: #5C4A1C;
+        --island-active-bg: #00422E;
+        --island-active-fg: #ffffff;
 }
 
 /* Registered so pulse keyframes can animate the fill shared by the pill and its shoulders. */
@@ -77,7 +145,7 @@ html.dark {
 }
 .island-outline { filter: var(--island-outline); }
 .island-muted { color: var(--island-muted); }
-.island-bordered { box-shadow: 0 0 0 1px var(--island-subtle-strong), 0 10px 24px -12px rgb(15 23 42 / 0.35); }
+.island-bordered { box-shadow: 0 0 0 1px var(--island-subtle-strong), 0 10px 24px -12px rgb(var(--slate-950) / 0.35); }
 html.dark .island-bordered { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 10px 24px -12px rgb(0 0 0 / 0.6); }
 
 .app-drag { -webkit-app-region: drag; }
@@ -85,7 +153,7 @@ html.dark .island-bordered { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 10p
 
 .app-shell-floating {
 	border-radius: 22px;
-	border: 1px solid rgb(148 163 184 / 0.35);
+	border: 1px solid rgb(var(--slate-400) / 0.35);
 }
 
 .island-nav a {
@@ -99,6 +167,6 @@ html.dark .island-bordered { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 10p
 }
 .island-nav a:hover { color: var(--island-fg); background: var(--island-subtle); }
 .island-nav a.island-nav-active { color: var(--island-active-fg); background: var(--island-active-bg); }
-.island-nav a:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+.island-nav a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 

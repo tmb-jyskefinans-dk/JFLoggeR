@@ -1,36 +1,30 @@
 // Utility for consistent category color assignment across components
 // Usage: getCategoryColor(category)
 
-// Most used groups get the most distinct hues: Udvikling Projekter = blue, Små udviklingsopgaver = emerald,
-// Support/drift = orange family. Other groups use hue families that do not clash with those three.
+// Returns a CSS variable (defined per light/dark theme in styles.scss) from the CVI infographic palette.
+// Most used groups get the most distinct hues: Udvikling Projekter = green, Små udviklingsopgaver = lilla,
+// Support/drift = koral family. Bind with [style.*] (not SVG attributes) so var() resolves.
 const CATEGORY_COLORS: Record<string, string> = {
   // Udvikling Projekter
-  'Udvikling (prioriterede jf. projektoversigten)': '#3B82F6',
-  'Estimering': '#22D3EE',
+  'Udvikling (prioriterede jf. projektoversigten)': 'var(--cat-dev-project)',
+  'Estimering': 'var(--cat-estimering)',
   // Små Udviklingsopgaver
-  'Udvikling (prioriterede opgaver)': '#10B981',
+  'Udvikling (prioriterede opgaver)': 'var(--cat-small-dev)',
   // Support (ikke planlagt)
-  'Vagtpostkasse/daglig drift': '#F97316',
-  'Vagtpostkasse/daglig drift - TFS': '#F59E0B',
-  'Vagtpostkasse/daglig drift - Jyffi': '#EAB308',
-  'Sparring/afklaringer med forretning': '#EF4444',
-  'Eksterne systemer': '#FB7185',
+  'Vagtpostkasse/daglig drift': 'var(--cat-support)',
+  'Vagtpostkasse/daglig drift - TFS': 'var(--cat-support-tfs)',
+  'Vagtpostkasse/daglig drift - Jyffi': 'var(--cat-support-jyffi)',
+  'Sparring/afklaringer med forretning': 'var(--cat-sparring)',
+  'Eksterne systemer': 'var(--cat-external)',
   // Forretningsmæssig Drift (Planlagt)
-  'Agile (daglig standup, planning, refinement, styring osv.)': '#D946EF',
-  'Div. forretningsmæssig drift (servicevinduer., o.l.)': '#F0ABFC',
+  'Agile (daglig standup, planning, refinement, styring osv.)': 'var(--cat-agile)',
+  'Div. forretningsmæssig drift (servicevinduer., o.l.)': 'var(--cat-ops)',
   // Team
-  'Møder (ikke specifikke opgaver/projekter)': '#8B5CF6',
-  'Ferie, afspadsering, sygdom': '#94A3B8',
-  'Vidensdeling, research, uddannelse og tilegning af viden': '#84CC16'
+  'Møder (ikke specifikke opgaver/projekter)': 'var(--cat-meetings)',
+  'Ferie, afspadsering, sygdom': 'var(--cat-absence)',
+  'Vidensdeling, research, uddannelse og tilegning af viden': 'var(--cat-knowledge)'
 };
 
-// Ad-hoc categories (Import, Andet, …) get muted tones so they never look like the main ones.
-const FALLBACK_PALETTE = ['#64748B', '#A8A29E', '#78716C', '#9CA3AF', '#71717A'];
-
 export function getCategoryColor(category: string): string {
-  const known = CATEGORY_COLORS[category];
-  if (known) return known;
-  let hash = 0;
-  for (let i = 0; i < category.length; i++) hash = category.charCodeAt(i) + ((hash << 5) - hash);
-  return FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
+  return CATEGORY_COLORS[category] ?? 'var(--cat-other)';
 }

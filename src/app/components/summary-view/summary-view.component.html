@@ -135,7 +135,7 @@
               <desc id="donutDesc">Fordeling af loggede minutter per kategori for valgt dag</desc>
               <circle cx="70" cy="70" r="54" fill="none" stroke="var(--tw-color-slate-300,var(--tw-prose-body))" stroke-width="18" opacity="0.25"></circle>
               @for(seg of donutSegments(); track seg.category) {
-                <circle cx="70" cy="70" r="54" fill="none" [attr.stroke]="seg.color" stroke-width="18" stroke-linecap="butt"
+                <circle cx="70" cy="70" r="54" fill="none" [style.stroke]="seg.color" stroke-width="18" stroke-linecap="butt"
                   [attr.stroke-dasharray]="(animateDonut() ? (seg.length + ' ' + (circumference - seg.length)) : ('0 ' + circumference))"
                   [attr.stroke-dashoffset]="-seg.offset" opacity="0.95" class="donut-seg"
                   tabindex="0"

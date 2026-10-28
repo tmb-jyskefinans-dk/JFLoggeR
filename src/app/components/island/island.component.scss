@@ -125,7 +125,7 @@ $collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
   &:hover { background: var(--island-subtle-strong); transform: scale(1.12); }
   &:active { transform: scale(0.95); }
-  &:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 1px; }
+  &:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 }
 .island-ring-segment { transition: stroke-dasharray 0.6s cubic-bezier(0.22, 1, 0.36, 1), stroke-dashoffset 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
 .idle-total { font-size: 10px; color: var(--island-muted); white-space: nowrap; }
@@ -160,7 +160,7 @@ $collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
   transition: background-color 0.15s ease, transform 0.15s ease;
 
   &:active { transform: scale(0.96); }
-  &:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+  &:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 }
 
 .island-chip-neutral {
@@ -194,10 +194,10 @@ $collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
   &:hover { background: var(--island-subtle-strong); color: var(--island-fg); }
   &[aria-pressed='true'] { background: var(--island-active-bg); color: var(--island-active-fg); }
-  &:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+  &:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 }
 
-.island-pill:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+.island-pill:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .island-pulse-slot { animation: island-pulse-slot 1.2s ease-out 3; }
 .island-pulse-stale { animation: island-pulse-stale 1.2s ease-out 3; }
