@@ -95,6 +95,35 @@ export function progressRatio(logged: number, total: number): number {
   return Math.min(1, Math.max(0, logged / total));
 }
 
+export interface RingSegment {
+  category: string;
+  minutes: number;
+  length: number;
+  offset: number;
+}
+
+/** Splits the progress ring into per-category arcs in order of first use; overtime scales to a full ring. */
+export function categoryRingSegments(
+  entries: readonly IslandEntryLike[],
+  plannedMinutes: number,
+  circumference: number
+): RingSegment[] {
+  const byCategory = new Map<string, number>();
+  for (const e of [...entries].sort((a, b) => a.start.localeCompare(b.start))) {
+    const minutes = loggedMinutes([e]);
+    if (minutes > 0) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + minutes);
+  }
+  const total = [...byCategory.values()].reduce((a, b) => a + b, 0);
+  if (!total) return [];
+  const scale = circumference / Math.max(total, plannedMinutes > 0 ? plannedMinutes : 0);
+  let offset = 0;
+  return [...byCategory].map(([category, minutes]) => {
+    const segment = { category, minutes, length: minutes * scale, offset };
+    offset += segment.length;
+    return segment;
+  });
+}
+
 export function formatDuration(minutes: number): string {
   const m = Math.max(0, Math.round(minutes));
   const h = Math.floor(m / 60);

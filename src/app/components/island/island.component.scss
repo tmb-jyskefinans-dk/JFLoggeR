@@ -112,9 +112,22 @@ $collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
 .island-panel-header { border-bottom: 1px solid var(--island-divider); }
 .island-track { color: var(--island-track); }
-.island-ring-color { color: var(--island-ring-color); }
 .island-accent { color: var(--island-accent); }
-.idle-progress { flex: 0 0 16px; }
+// Padding enlarges the hit target of the 16px ring without changing the pill layout.
+.idle-progress {
+  flex: none;
+  display: inline-flex;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+
+  &:hover { background: var(--island-subtle-strong); transform: scale(1.12); }
+  &:active { transform: scale(0.95); }
+  &:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 1px; }
+}
+.island-ring-segment { transition: stroke-dasharray 0.6s cubic-bezier(0.22, 1, 0.36, 1), stroke-dashoffset 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
 .idle-total { font-size: 10px; color: var(--island-muted); white-space: nowrap; }
 .idle-undo { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--island-success); }
 
@@ -133,6 +146,7 @@ $collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 .idle-next { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .idle-countdown { font-size: 10px; font-weight: 600; color: var(--island-accent); }
+.idle-off { font-size: 10px; font-weight: 600; color: var(--island-muted); }
 
 .island-chip {
   display: inline-flex;
@@ -185,8 +199,6 @@ $collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
 .island-pill:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
 
-.island-ring { transition: stroke-dashoffset 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
-
 .island-pulse-slot { animation: island-pulse-slot 1.2s ease-out 3; }
 .island-pulse-stale { animation: island-pulse-stale 1.2s ease-out 3; }
 
@@ -203,5 +215,5 @@ $collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
   .island-content, .island-morph-in, .island-morph-out, .island-morph-in .island-panel, .island-morph-out .island-panel,
   .island-morph-in .island-panel-content, .island-morph-out .island-panel-content,
   .island-pulse-slot, .island-pulse-stale { animation: none; }
-  .island-pill, .island-ring { transition: none; }
+  .island-pill, .island-ring-segment, .idle-progress { transition: none; }
 }

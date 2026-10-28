@@ -1,4 +1,5 @@
 import {
+  categoryRingSegments,
   currentSlotRange,
   formatDuration,
   hmToMinutes,
@@ -66,6 +67,25 @@ describe('island status util', () => {
     expect(nextLogSlot(new Date(2026, 9, 28, 15, 50), s)).toEqual({ time: '16:00', minutesUntil: 10 });
     expect(nextLogSlot(new Date(2026, 9, 28, 16, 5), s)).toBeNull();
     expect(nextLogSlot(new Date(2026, 10, 1, 10, 0), s)).toBeNull();
+  });
+
+  test('category ring segments follow time order and scale to planned minutes', () => {
+    const entries = [
+      { start: '09:00', end: '10:00', description: 'b', category: 'Møde' },
+      { start: '08:00', end: '09:00', description: 'a', category: 'Udvikling' },
+      { start: '10:00', end: '10:30', description: 'c', category: 'Udvikling' },
+      { start: '11:00', end: '10:00', description: 'bad', category: 'Andet' }
+    ];
+    const segs = categoryRingSegments(entries, 480, 100);
+    expect(segs.map(s => s.category)).toEqual(['Udvikling', 'Møde']);
+    expect(segs[0].minutes).toBe(90);
+    expect(segs[0].length).toBeCloseTo(18.75);
+    expect(segs[1].offset).toBeCloseTo(18.75);
+    expect(segs[1].length).toBeCloseTo(12.5);
+
+    const overtime = categoryRingSegments(entries, 60, 100);
+    expect(overtime.reduce((a, s) => a + s.length, 0)).toBeCloseTo(100);
+    expect(categoryRingSegments([], 480, 100).length).toBe(0);
   });
 
   test('newest pending slot and hm parsing', () => {

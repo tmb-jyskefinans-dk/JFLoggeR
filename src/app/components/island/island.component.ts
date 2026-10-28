@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { Router } from '@angular/router';
 import { IpcService } from '../../services/ipc.service';
 import { ClockService } from '../../services/clock.service';
 import { IslandService } from '../../services/island.service';
@@ -6,17 +7,20 @@ import { SnackbarService } from '../../services/snackbar.service';
 import { LogDialogComponent } from '../log-dialog/log-dialog.component';
 import {
   IslandEntryLike,
+  categoryRingSegments,
   currentSlotRange,
   formatDuration,
   isInWorkTime,
   lastLoggedEntry,
   loggedMinutes,
+  minutesToHm,
   newestPendingSlot,
   nextLogSlot,
   plannedWorkMinutes,
   progressRatio
 } from './island-status.util';
 import { effectiveSlotMinutes } from '../../models/work-schedule';
+import { getCategoryColor } from '../../models/category-colors';
 
 const RING_RADIUS = 15.5;
 const PANEL_WINDOW_PADDING = 2;
@@ -37,6 +41,7 @@ export class IslandComponent implements OnDestroy {
   clock = inject(ClockService);
   island = inject(IslandService);
   snackbar = inject(SnackbarService);
+  private router = inject(Router);
 
   readonly ringCircumference = 2 * Math.PI * RING_RADIUS;
   readonly ringRadius = RING_RADIUS;
@@ -61,7 +66,18 @@ export class IslandComponent implements OnDestroy {
     return progressRatio(loggedMinutes(this.todayEntries()), plannedWorkMinutes(new Date(), this.settings()));
   });
   progressPct = computed(() => Math.round(this.progress() * 100));
-  ringOffset = computed(() => this.ringCircumference * (1 - this.progress()));
+  ringSegments = computed(() => {
+    this.clock.today();
+    const planned = plannedWorkMinutes(new Date(), this.settings());
+    return categoryRingSegments(this.todayEntries(), planned, this.ringCircumference)
+      .map(seg => ({ ...seg, color: getCategoryColor(seg.category) }));
+  });
+  ringBreakdown = computed(() => {
+    const parts = this.ringSegments().map(seg => `${seg.category}: ${formatDuration(seg.minutes)}`);
+    return [...parts, `${this.loggedLabel()} logget i dag (${this.progressPct()}%)`].join('\n');
+  });
+  ringTitle = computed(() => `${this.ringBreakdown()}\nKlik for at åbne I dag`);
+  nowLabel = computed(() => minutesToHm(this.clock.currentTime()));
   pendingCount = computed(() => this.ipc.pendingSlots().length);
   private holdCompact = signal(false);
   idle = computed(() => this.pendingCount() === 0 && !this.holdCompact());
@@ -170,6 +186,11 @@ export class IslandComponent implements OnDestroy {
 
   logOther() {
     this.island.expand({ manual: false, focus: true, prefill: false });
+  }
+
+  openToday() {
+    this.island.detach();
+    this.router.navigate(['/today']);
   }
 
   private focusNudgeTarget(attempt = 0) {

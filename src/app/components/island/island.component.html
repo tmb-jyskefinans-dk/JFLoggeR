@@ -9,13 +9,19 @@
     (keydown.enter)="expand()" (keydown.space)="$event.preventDefault(); expand()">
     @if (idle()) {
       <div class="island-content island-content-idle">
-      <div class="idle-progress" [title]="loggedLabel() + ' logget i dag (' + progressPct() + '%)'">
+      <button type="button" class="idle-progress" [title]="ringTitle()" [attr.aria-label]="ringTitle()"
+        (pointerdown)="$event.stopPropagation()" (click)="openToday()"
+        (keydown.enter)="$event.stopPropagation()" (keydown.space)="$event.stopPropagation()">
         <svg viewBox="0 0 36 36" class="h-4 w-4 -rotate-90" aria-hidden="true">
           <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="4" class="island-track" />
-          <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"
-            class="island-ring island-ring-color" [attr.stroke-dasharray]="ringCircumference" [attr.stroke-dashoffset]="ringOffset()" />
+          @for (seg of ringSegments(); track seg.category) {
+            <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke-width="4" class="island-ring-segment"
+              [attr.stroke]="seg.color"
+              [attr.stroke-dasharray]="seg.length + ' ' + ringCircumference"
+              [attr.stroke-dashoffset]="-seg.offset" />
+          }
         </svg>
-      </div>
+      </button>
       @if (justLogged()) {
         <button type="button" class="idle-undo" [style.--undo-duration]="undoWindowMs + 'ms'"
           aria-label="Fortryd seneste registrering" (pointerdown)="$event.stopPropagation()" (click)="undo()">
@@ -26,13 +32,12 @@
           Fortryd
         </button>
       } @else {
-        <time class="idle-next" [title]="nextLogTitle()" [attr.aria-label]="nextLogTitle()">
+        <time class="idle-next" [title]="nextLogTitle()" [attr.aria-label]="'Klokken ' + nowLabel() + '. ' + nextLogTitle()">
+          <span class="text-sm font-semibold tabular-nums">{{ nowLabel() }}</span>
           @if (nextLog(); as next) {
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3 island-accent" aria-hidden="true"><path d="M7 4l6 6-6 6"/></svg>
-            <span class="text-sm font-semibold tabular-nums">{{ next.time }}</span>
             <span class="idle-countdown tabular-nums">{{ next.minutesUntil }}m</span>
           } @else {
-            <span class="text-xs font-semibold island-muted">Fri</span>
+            <span class="idle-off">fri</span>
           }
         </time>
       }
@@ -40,12 +45,15 @@
       </div>
     } @else {
     <div class="island-content island-content-compact">
-    <div class="relative h-10 w-10 shrink-0" [title]="loggedLabel() + ' logget i dag (' + progressPct() + '%)'">
+    <div class="relative h-10 w-10 shrink-0" [title]="ringBreakdown()">
       <svg viewBox="0 0 36 36" class="h-10 w-10 -rotate-90" aria-hidden="true">
         <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" class="island-track" />
-        <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
-          class="island-ring island-ring-color"
-          [attr.stroke-dasharray]="ringCircumference" [attr.stroke-dashoffset]="ringOffset()" />
+        @for (seg of ringSegments(); track seg.category) {
+          <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke-width="3" class="island-ring-segment"
+            [attr.stroke]="seg.color"
+            [attr.stroke-dasharray]="seg.length + ' ' + ringCircumference"
+            [attr.stroke-dashoffset]="-seg.offset" />
+        }
       </svg>
       <span class="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tabular-nums">{{ progressPct() }}%</span>
     </div>
@@ -109,12 +117,15 @@
     <div #panelContent class="island-panel-content">
       <header class="island-surface island-panel-header flex h-14 items-center gap-3 pl-3 pr-2 select-none cursor-grab active:cursor-grabbing"
         (pointerdown)="onHeaderPointerDown($event)">
-        <div class="relative h-9 w-9 shrink-0" [title]="loggedLabel() + ' logget i dag'">
+        <div class="relative h-9 w-9 shrink-0" [title]="ringBreakdown()">
           <svg viewBox="0 0 36 36" class="h-9 w-9 -rotate-90" aria-hidden="true">
             <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" class="island-track" />
-            <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
-              class="island-ring island-ring-color"
-              [attr.stroke-dasharray]="ringCircumference" [attr.stroke-dashoffset]="ringOffset()" />
+            @for (seg of ringSegments(); track seg.category) {
+              <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke-width="3" class="island-ring-segment"
+                [attr.stroke]="seg.color"
+                [attr.stroke-dasharray]="seg.length + ' ' + ringCircumference"
+                [attr.stroke-dashoffset]="-seg.offset" />
+            }
           </svg>
           <span class="absolute inset-0 flex items-center justify-center text-[9px] font-semibold tabular-nums">{{ progressPct() }}%</span>
         </div>
