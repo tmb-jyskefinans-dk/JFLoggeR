@@ -1,14 +1,20 @@
-<div class="fixed inset-0 z-50 flex items-start justify-center p-6 sm:p-10 overflow-y-auto bg-black/40 backdrop-blur-sm" (keydown.escape)="closed.emit()" role="presentation">
-  <form (submit)="submit()" role="dialog" aria-modal="true" aria-labelledby="logDialogTitle"
-    class="w-[680px] max-w-[90vw] md:w-[760px] rounded-xl border border-slate-200 dark:border-slate-600 shadow-xl bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 p-0 text-slate-700 dark:text-slate-200 flex flex-col gap-6">
-    <header class="flex items-start justify-between px-6 py-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-t-xl">
+<div [class]="inline() ? 'contents' : 'fixed inset-0 z-50 flex items-start justify-center p-6 sm:p-10 overflow-y-auto bg-black/40 backdrop-blur-sm'" (keydown.escape)="closed.emit()" role="presentation">
+  <form (submit)="submit()" role="dialog" [attr.aria-modal]="inline() ? null : 'true'" aria-labelledby="logDialogTitle"
+    [class]="inline()
+      ? 'w-full pt-5 text-slate-700 dark:text-slate-200 flex flex-col gap-5'
+      : 'w-[680px] max-w-[90vw] md:w-[760px] rounded-3xl border border-slate-200 dark:border-slate-700 shadow-2xl bg-white dark:bg-slate-900 p-0 text-slate-700 dark:text-slate-200 flex flex-col gap-6 overflow-hidden'">
+    @if (inline()) {
+      <h2 id="logDialogTitle" class="sr-only">Registrér tid</h2>
+    } @else {
+    <header class="island-surface flex items-start justify-between px-6 py-5 border-b border-slate-200 dark:border-transparent">
       <div class="space-y-1">
-  <h2 id="logDialogTitle" class="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Registrér tid</h2>
-  <p class="text-xs text-slate-500 dark:text-slate-400">{{ manualMode() ? 'Manuel registrering — angiv dato og tid' : 'Registrér arbejde udført i tidsintervaller' }}</p>
+  <h2 id="logDialogTitle" class="text-xl font-semibold tracking-tight">Registrér tid</h2>
+  <p class="text-xs island-muted">{{ manualMode() ? 'Manuel registrering — angiv dato og tid' : 'Registrér arbejde udført i tidsintervaller' }}</p>
       </div>
       <button type="button" (click)="closed.emit()" aria-label="Close"
-        class="text-xl leading-none px-2 py-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition">×</button>
+        class="text-xl leading-none h-8 w-8 rounded-full island-muted hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-white/15 dark:hover:text-white transition">×</button>
     </header>
+    }
 
     @if(dayLocked()) {
       <section class="mx-6 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200" role="status" aria-live="polite">
@@ -188,9 +194,9 @@
     <footer class="px-6 pb-6 pt-2">
       <div class="flex gap-3 justify-end w-full">
         <button type="button" (click)="closed.emit()"
-          class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition">Annuller</button>
+          class="inline-flex items-center justify-center rounded-full text-sm font-semibold px-5 h-10 gap-2 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 active:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-700 transition">{{ inline() ? 'Fold sammen' : 'Annuller' }}</button>
         <button #submitBtn type="submit" [disabled]="dayLocked() || (manualMode() ? (!manualDate() || !manualStart() || !manualEnd()) : selectedSlots().length===0) || !category().trim() || (category()!=='Andet' ? !description().trim() : !andetDescription().trim()) || (jiraSelectionRequired() && !hasValidSelectedJiraIssue())"
-          class="inline-flex items-center justify-center rounded-md text-sm font-semibold px-4 h-10 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition">Gem registrering</button>
+          class="inline-flex items-center justify-center rounded-full text-sm font-semibold px-5 h-10 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition">Gem registrering</button>
       </div>
     </footer>
   </form>

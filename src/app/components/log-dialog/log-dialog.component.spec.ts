@@ -22,6 +22,7 @@ describe('LogDialogComponent', () => {
     recent,
     settings,
     bulkSelectAllFlag,
+    dayExported: signal(new Map<string, boolean>()),
     loadRecent: jasmine.createSpy('loadRecent'),
     submitPending: jasmine.createSpy('submitPending').and.resolveTo(undefined),
     loadDay: jasmine.createSpy('loadDay'),
@@ -35,6 +36,9 @@ describe('LogDialogComponent', () => {
     recent.set([]);
     settings.set({ slot_minutes: 15, minimize_after_notification_submit: false });
     bulkSelectAllFlag.set(false);
+    for (const spy of ['loadRecent', 'submitPending', 'loadDay', 'searchJiraIssues']) {
+      ((ipcMock as any)[spy] as jasmine.Spy).calls.reset();
+    }
 
     originalWorkApi = (window as any).workApi;
     (window as any).workApi = {
@@ -52,6 +56,16 @@ describe('LogDialogComponent', () => {
 
   afterEach(() => {
     (window as any).workApi = originalWorkApi;
+  });
+
+  it('renders inline variant without modal backdrop', () => {
+    fixture.componentRef.setInput('variant', 'inline');
+    fixture.detectChanges();
+
+    const wrapper = fixture.nativeElement.firstElementChild as HTMLElement;
+    expect(wrapper.classList.contains('contents')).toBeTrue();
+    expect(wrapper.classList.contains('fixed')).toBeFalse();
+    expect(fixture.nativeElement.querySelector('form')?.getAttribute('aria-modal')).toBeNull();
   });
 
   it('focuses description input on manual open', fakeAsync(() => {

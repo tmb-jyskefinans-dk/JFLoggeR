@@ -1,5 +1,5 @@
 // electron/main.ts
-import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import https from 'node:https';
@@ -104,8 +104,31 @@ import {
   importExternalLines,
   getJiraLoggedWorklogs,
   setJiraLoggedWorklogs,
-  clearJiraLoggedWorklogs
+  clearJiraLoggedWorklogs,
+  updateWindowState
 } from './db';
+import {
+  WindowMode,
+  PointerDragKind,
+  Rect,
+  Size,
+  COMPACT_SIZE,
+  IDLE_SIZE,
+  EXPANDED_WIDTH,
+  EXPANDED_DEFAULT_HEIGHT,
+  EXPANDED_MIN_HEIGHT,
+  DEFAULT_DETACHED_SIZE,
+  isDockedMode,
+  computeDockedBounds,
+  dockRatioFromBounds,
+  clampDockedX,
+  clampToWorkArea,
+  shouldSnapToDock,
+  shouldDetachFromDrag,
+  detachedBoundsAtCursor,
+  isUsableRect,
+  resizeFromDrag
+} from './island';
 import { computeStaleSlot } from './stale';
 import { setExternalLogged, getExternalLogged } from './db';
 import { azureAuth } from './auth';
@@ -199,6 +222,14 @@ let lastStaleNotifiedKey: string | null = null;
 let digestQueue: Date[] = []; // slots accumulated while user away
 let lastEntryEndTime: Date | null = null; // for stale detection heuristics
 let jiraMyselfCache: { psaKey: string; accountId?: string; displayName?: string; emailAddress?: string } | null = null;
+let windowMode: WindowMode = 'compact';
+let expandedHeight = EXPANDED_DEFAULT_HEIGHT;
+let lastProgrammaticBoundsAt = 0;
+let restoreBoundsBeforeMaximize: Rect | null = null;
+let pointerDrag: { kind: PointerDragKind; cursor: { x: number; y: number }; bounds: Rect; moved: boolean } | null = null;
+let snapHintActive = false;
+let dockCenterRatio = 0.5;
+let compactIdle = true;
 
 type JiraMyselfResponse = {
   accountId?: unknown;
@@ -262,15 +293,137 @@ function enqueuePending(key: string, opts: { silent?: boolean } = {}) {
   }
 }
 
+function currentWorkArea(): Rect {
+  if (win) return screen.getDisplayMatching(win.getBounds()).workArea;
+  return screen.getPrimaryDisplay().workArea;
+}
+
+function currentDockArea(): Rect {
+  const display = win ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay();
+  return { ...display.workArea, y: display.bounds.y, height: display.workArea.y + display.workArea.height - display.bounds.y };
+}
+
+function setBoundsProgrammatically(bounds: Rect) {
+  if (!win) return;
+  lastProgrammaticBoundsAt = Date.now();
+  win.setBounds(bounds);
+}
+
+function dockedSize(mode: WindowMode): Size {
+  return mode === 'expanded' ? { width: EXPANDED_WIDTH, height: expandedHeight } : (compactIdle ? IDLE_SIZE : COMPACT_SIZE);
+}
+
+function dockedBounds(mode: WindowMode): Rect {
+  return computeDockedBounds(currentDockArea(), dockedSize(mode), dockCenterRatio);
+}
+
+function resolveDetachedBounds(workArea: Rect): Rect {
+  const saved = getSettings().detached_bounds;
+  if (isUsableRect(saved)) return clampToWorkArea(saved, screen.getDisplayMatching(saved).workArea);
+  const width = Math.min(DEFAULT_DETACHED_SIZE.width, workArea.width);
+  const height = Math.min(DEFAULT_DETACHED_SIZE.height, workArea.height);
+  return {
+    x: Math.round(workArea.x + (workArea.width - width) / 2),
+    y: Math.round(workArea.y + (workArea.height - height) / 2),
+    width,
+    height
+  };
+}
+
+function persistDetachedBounds() {
+  if (!win || windowMode !== 'detached' || restoreBoundsBeforeMaximize) return;
+  try { updateWindowState({ detached_bounds: win.getBounds() }); } catch (e) { console.warn('[main] persist bounds failed', e); }
+}
+
+function sendMaximizeState() {
+  try { win?.webContents.send('window:maximize-state', { maximized: !!restoreBoundsBeforeMaximize }); } catch { }
+}
+
+function setSnapHint(active: boolean) {
+  if (snapHintActive === active) return;
+  snapHintActive = active;
+  try { win?.webContents.send('island:snap-hint', { active }); } catch { }
+}
+
+function applyWindowMode(mode: WindowMode, opts: { focus?: boolean; bounds?: Rect } = {}) {
+  if (!win) return;
+  const prev = windowMode;
+  windowMode = mode;
+  setSnapHint(false);
+  if (isDockedMode(mode)) {
+    if (restoreBoundsBeforeMaximize) { restoreBoundsBeforeMaximize = null; sendMaximizeState(); }
+    win.setSkipTaskbar(true);
+    win.setAlwaysOnTop(true, 'floating');
+    setBoundsProgrammatically(dockedBounds(mode));
+  } else {
+    win.setAlwaysOnTop(false);
+    win.setSkipTaskbar(false);
+    setBoundsProgrammatically(opts.bounds ?? resolveDetachedBounds(currentWorkArea()));
+  }
+  if (opts.focus || (mode === 'detached' && prev !== 'detached')) {
+    try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.focus(); } catch { }
+  }
+  if (isDockedMode(prev) !== isDockedMode(mode)) {
+    try { updateWindowState({ window_mode: isDockedMode(mode) ? 'docked' : 'detached' }); } catch { }
+  }
+  try { win.webContents.send('window:mode', { mode }); } catch { }
+}
+
+/** Visible docked island takes over slot prompts from OS toasts. */
+function islandVisible(): boolean {
+  return !!win && isDockedMode(windowMode) && win.isVisible() && !win.isMinimized();
+}
+
+function pulseIsland(kind: 'slot' | 'stale' | 'digest', slot?: string) {
+  try { win?.webContents.send('island:pulse', { kind, slot }); } catch { }
+}
+
+function bringWindowToFront() {
+  if (!win) return;
+  try { if (win.isMinimized()) win.restore(); } catch { }
+  try { win.show(); win.focus(); } catch { }
+  // Docked island is permanently on top; only flash top-most for the detached window.
+  if (windowMode === 'detached') {
+    try {
+      win.setAlwaysOnTop(true);
+      win.focus();
+      setTimeout(() => { try { if (windowMode === 'detached') win?.setAlwaysOnTop(false); } catch { } }, 400);
+    } catch { }
+  }
+}
+
+function redockAfterDisplayChange() {
+  if (!win) return;
+  if (isDockedMode(windowMode)) { applyWindowMode(windowMode); return; }
+  const b = win.getBounds();
+  setBoundsProgrammatically(clampToWorkArea(b, screen.getDisplayMatching(b).workArea));
+}
+
 function createWindow() {
+  const settings = getSettings();
+  windowMode = settings.window_mode === 'detached' ? 'detached' : 'compact';
+  dockCenterRatio = Number.isFinite(settings.dock_center_ratio) ? Number(settings.dock_center_ratio) : 0.5;
+  const primaryWorkArea = screen.getPrimaryDisplay().workArea;
+  const docked = isDockedMode(windowMode);
+  const initialBounds = docked
+    ? dockedBounds('compact')
+    : resolveDetachedBounds(primaryWorkArea);
   win = new BrowserWindow({
-    width: 1380,
-    height: 860,
+    ...initialBounds,
     show: false,
     frame: false, // frameless so we can draw custom title bar + window controls
     titleBarStyle: 'hidden', // hide native title bar (macOS shows traffic lights inset if frame true)
     title: 'JF LoggR',
-    backgroundColor: '#1e293b', // slight dark bg during load (adjust to theme)
+    // Transparent so the island pill and rounded detached shell can float over the desktop.
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    // Transparent windows resize unreliably on Windows; renderer provides custom resize grips.
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: docked,
+    skipTaskbar: docked,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -287,18 +440,36 @@ function createWindow() {
   const devUrl = process.env['VITE_DEV_SERVER_URL'];
   if (devUrl) {
     win.loadURL(devUrl);
-    win.webContents.openDevTools({ mode: 'detach' });
+    // DevTools draws a size overlay on every island resize, so only open it on request.
+    if (process.env['ELECTRON_DEVTOOLS'] === '1') win.webContents.openDevTools({ mode: 'detach' });
   } else {
     win.loadFile(path.join(__dirname, '../../dist/work-logger/browser/index.html'));
   }
+  if (!app.isPackaged) {
+    win.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') win?.webContents.toggleDevTools();
+    });
+  }
 
+  if (docked) win.setAlwaysOnTop(true, 'floating');
   win.on('ready-to-show', () => win?.show());
+  win.webContents.on('did-finish-load', () => {
+    try { win?.webContents.send('window:mode', { mode: windowMode }); } catch { }
+  });
 
-  // Forward maximize state changes to renderer so custom controls reflect current state
-  win.on('maximize', () => win?.webContents.send('window:maximize-state', { maximized: true }));
-  win.on('unmaximize', () => win?.webContents.send('window:maximize-state', { maximized: false }));
-  win.on('enter-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: true }));
-  win.on('leave-full-screen', () => win?.webContents.send('window:maximize-state', { maximized: win?.isMaximized() ?? false }));
+  const isUserBoundsChange = () =>
+    windowMode === 'detached' && !pointerDrag && Date.now() - lastProgrammaticBoundsAt > 400;
+  win.on('move', () => {
+    if (!win || !isUserBoundsChange() || restoreBoundsBeforeMaximize) return;
+    setSnapHint(shouldSnapToDock(win.getBounds(), currentWorkArea()));
+  });
+  win.on('moved', () => {
+    if (!isUserBoundsChange()) return;
+    if (snapHintActive) { applyWindowMode('compact'); return; }
+    if (restoreBoundsBeforeMaximize) { restoreBoundsBeforeMaximize = null; sendMaximizeState(); }
+    persistDetachedBounds();
+  });
+  win.on('resized', () => { if (isUserBoundsChange()) persistDetachedBounds(); });
 }
 
 function updateTrayTooltip() {
@@ -325,8 +496,7 @@ function showDigestNotification() {
   const n = new Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
   n.on('click', () => {
     if (win) {
-      try { if (win.isMinimized()) win.restore(); } catch { }
-      try { win.show(); win.focus(); } catch { }
+      bringWindowToFront();
       // Open prompt for earliest slot captured at notification creation time.
       win?.webContents.send('prompt:open', { slot: slotKey(firstSlot), source: 'notification' });
       // Force open dialog even if slot was previously handled so user can re-log or review.
@@ -345,13 +515,15 @@ function notifyForSlot(slot: Date) {
   const body = `Log ${day} ${hh}:${mm}–${hh}:${(Number(mm) + slotLen).toString().padStart(2, '0')}`;
 
   const st = getSettings();
+  if (islandVisible()) {
+    pulseIsland('slot', slotKey(slot));
+    win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'island' });
+    if (!st.island_os_notifications) return;
+  }
   const n = new Notification({ title: 'Tid til at registér tid', body, silent: !!st.notification_silent });
   n.on('click', () => {
     if (win) {
-      try { if (win.isMinimized()) win.restore(); } catch { }
-      try { win.show(); } catch { }
-      try { win.focus(); } catch { }
-      try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 400); } catch { }
+      bringWindowToFront();
       console.log('[main] notification click -> prompt:open', slotKey(slot));
       win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'notification' });
       // Also force dialog open regardless of prior handled state.
@@ -399,10 +571,7 @@ function scheduleTicker() {
           try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch { }
           notifyForSlot(prevStart);
           if (sDyn.auto_focus_on_slot && win) {
-            try { if (win.isMinimized()) win.restore(); } catch { }
-            try { win.show(); } catch { }
-            try { win.focus(); } catch { }
-            try { win!.setAlwaysOnTop(true); win!.focus(); setTimeout(() => { try { win!.setAlwaysOnTop(false); } catch { } }, 350); } catch { }
+            bringWindowToFront();
             console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
             win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
           }
@@ -429,10 +598,14 @@ function scheduleStaleCheck() {
         lastStaleNotifiedKey = result.key;
         const hm = result.key.split('T')[1];
         const body = `Interval fra ${hm} er nu over ${Math.round(result.ageMinutes)} min uden registrering. Log tiden for at undgå at glemme den.`;
+        if (islandVisible()) {
+          pulseIsland('stale', result.key);
+          if (!st.island_os_notifications) return;
+        }
         const n = new Notification({ title: 'Overvokset interval', body, silent: !!st.notification_silent });
         n.on('click', () => {
           if (win) {
-            try { win.show(); win.focus(); } catch { }
+            bringWindowToFront();
             win?.webContents.send('prompt:open', { slot: result.key, source: 'notification' });
             win?.webContents.send('dialog:open-log', { slot: result.key, source: 'notification' });
           }
@@ -1011,7 +1184,8 @@ ipcMain.handle(
       }
     } catch { }
     updateTrayTooltip();
-    if (payload?.minimizeWindowAfterSubmit) {
+    // The docked island collapses itself after submit; minimizing would hide it.
+    if (payload?.minimizeWindowAfterSubmit && windowMode === 'detached') {
       try { win?.minimize(); } catch { }
     }
     return { ok: true };
@@ -1025,8 +1199,7 @@ ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
   const st = getSettings();
   const n = new Notification({ title: 'Work Logger (Test)', body, silent: !!st.notification_silent });
   n.on('click', () => {
-    win?.show();
-    win?.focus();
+    bringWindowToFront();
     win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'notification' });
     win?.webContents.send('dialog:open-log', { slot: slotKey(slot), source: 'notification' });
   });
@@ -1035,13 +1208,107 @@ ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
 });
 
 // Window control handlers (invoked from renderer via preload contextBridge)
-ipcMain.handle('window:minimize', () => { win?.minimize(); return { ok: true }; });
-ipcMain.handle('window:toggle-maximize', () => {
-  if (!win) return { ok: false, maximized: false };
-  if (win.isMaximized()) win.unmaximize(); else win.maximize();
-  return { ok: true, maximized: win.isMaximized() };
+ipcMain.handle('window:minimize', () => {
+  if (isDockedMode(windowMode)) win?.hide(); else win?.minimize();
+  return { ok: true };
 });
-ipcMain.handle('window:close', () => { win?.close(); return { ok: true }; });
+// Transparent windows cannot use native maximize reliably, so maximize = fill the work area.
+ipcMain.handle('window:toggle-maximize', () => {
+  if (!win || windowMode !== 'detached') return { ok: false, maximized: false };
+  if (restoreBoundsBeforeMaximize) {
+    const restore = restoreBoundsBeforeMaximize;
+    restoreBoundsBeforeMaximize = null;
+    setBoundsProgrammatically(restore);
+  } else {
+    restoreBoundsBeforeMaximize = win.getBounds();
+    setBoundsProgrammatically(currentWorkArea());
+  }
+  sendMaximizeState();
+  return { ok: true, maximized: !!restoreBoundsBeforeMaximize };
+});
+ipcMain.handle('window:close', () => {
+  if (isDockedMode(windowMode)) win?.hide(); else win?.close();
+  return { ok: true };
+});
+
+ipcMain.handle('island:get-mode', () => ({ mode: windowMode }));
+ipcMain.handle('island:set-mode', (_e, payload: { mode?: unknown; focus?: unknown }) => {
+  const mode = payload?.mode;
+  if (mode !== 'compact' && mode !== 'expanded' && mode !== 'detached') return { ok: false, mode: windowMode };
+  applyWindowMode(mode, { focus: payload?.focus === true });
+  return { ok: true, mode: windowMode };
+});
+// Renderer picks idle vs compact so it can grow the window before, and shrink it after, its CSS morph.
+ipcMain.handle('island:set-compact-idle', (_e, payload: { idle?: unknown }) => {
+  const idle = payload?.idle === true;
+  if (idle === compactIdle) return { ok: true };
+  compactIdle = idle;
+  if (win && windowMode === 'compact' && !pointerDrag) setBoundsProgrammatically(dockedBounds('compact'));
+  return { ok: true };
+});
+ipcMain.handle('island:resize', (_e, payload: { height?: unknown }) => {
+  const height = Number(payload?.height);
+  if (!win || windowMode !== 'expanded' || !Number.isFinite(height)) return { ok: false };
+  expandedHeight = Math.max(EXPANDED_MIN_HEIGHT, Math.round(height));
+  setBoundsProgrammatically(dockedBounds('expanded'));
+  return { ok: true };
+});
+
+const POINTER_DRAG_KINDS: ReadonlySet<PointerDragKind> = new Set(['move', 'resize-e', 'resize-s', 'resize-se']);
+// Cursor position is read in main so drags stay correct across mixed-DPI displays.
+ipcMain.on('window:pointer-drag', (_e, payload: { phase?: unknown; kind?: unknown }) => {
+  if (!win) return;
+  const cursor = screen.getCursorScreenPoint();
+  const phase = payload?.phase;
+  if (phase === 'start') {
+    const kind = payload?.kind as PointerDragKind;
+    if (!POINTER_DRAG_KINDS.has(kind)) return;
+    if (kind !== 'move' && windowMode !== 'detached') return;
+    pointerDrag = { kind, cursor, bounds: win.getBounds(), moved: false };
+    return;
+  }
+  if (!pointerDrag) return;
+  const dx = cursor.x - pointerDrag.cursor.x;
+  const dy = cursor.y - pointerDrag.cursor.y;
+  if (phase === 'move') {
+    if (!pointerDrag.moved && Math.hypot(dx, dy) < 4) return;
+    pointerDrag.moved = true;
+    lastProgrammaticBoundsAt = Date.now();
+    if (pointerDrag.kind === 'move' && isDockedMode(windowMode)) {
+      // Stay pinned to the top edge until pulled down far enough to tear off.
+      const area = currentDockArea();
+      const x = clampDockedX(area, pointerDrag.bounds.x + dx, pointerDrag.bounds.width);
+      win.setPosition(x, shouldDetachFromDrag(dy) ? pointerDrag.bounds.y + dy : pointerDrag.bounds.y);
+    } else if (pointerDrag.kind === 'move') {
+      win.setPosition(pointerDrag.bounds.x + dx, pointerDrag.bounds.y + dy);
+    } else {
+      win.setBounds(resizeFromDrag(pointerDrag.bounds, pointerDrag.kind, dx, dy));
+    }
+    return;
+  }
+  if (phase !== 'end') return;
+  const drag = pointerDrag;
+  pointerDrag = null;
+  if (drag.kind === 'move' && isDockedMode(windowMode)) {
+    if (drag.moved && shouldDetachFromDrag(dy)) {
+      const saved = getSettings().detached_bounds;
+      const size = isUsableRect(saved) ? { width: saved.width, height: saved.height } : DEFAULT_DETACHED_SIZE;
+      const workArea = screen.getDisplayNearestPoint(cursor).workArea;
+      applyWindowMode('detached', { bounds: detachedBoundsAtCursor(cursor, size, workArea), focus: true });
+      persistDetachedBounds();
+    } else {
+      if (drag.moved) {
+        const area = currentDockArea();
+        const x = clampDockedX(area, drag.bounds.x + dx, drag.bounds.width);
+        dockCenterRatio = dockRatioFromBounds(area, { x, width: drag.bounds.width });
+        try { updateWindowState({ dock_center_ratio: dockCenterRatio }); } catch { }
+      }
+      applyWindowMode(windowMode);
+    }
+  } else if (windowMode === 'detached' && drag.moved) {
+    persistDetachedBounds();
+  }
+});
 
 app.whenReady().then(() => {
   console.log('[main] app is ready, initializing DB and window...');
@@ -1073,10 +1340,17 @@ app.whenReady().then(() => {
           }
         },
         {
+          label: 'Skift mellem ø og fuld visning',
+          click: () => {
+            if (!win) return;
+            applyWindowMode(windowMode === 'detached' ? 'compact' : 'detached', { focus: true });
+          }
+        },
+        {
           label: 'Log nu',
           click: () => {
             if (!win) return;
-            try { win.show(); win.focus(); } catch { }
+            bringWindowToFront();
             // Open prompt for the slot that just finished (previous slot) so user can log immediately.
             const prev = previousSlotStart(new Date());
             const key = slotKey(prev);
@@ -1089,7 +1363,7 @@ app.whenReady().then(() => {
           label: 'Log alle ventende',
           click: () => {
             if (!win) return;
-            try { win.show(); win.focus(); } catch { }
+            bringWindowToFront();
             // Only open bulk dialog if there are pending slots
             if (pending.size > 0) {
               win?.webContents.send('dialog:open-log-all');
@@ -1103,7 +1377,8 @@ app.whenReady().then(() => {
           label: 'Gå til i dag',
           click: () => {
             if (!win) return;
-            try { win.show(); win.focus(); } catch { }
+            if (windowMode !== 'detached') applyWindowMode('detached', { focus: true });
+            else bringWindowToFront();
             // Send explicit navigate event for today summary view
             const today = toLocalDateYMD(new Date());
             win?.webContents.send('navigate:today', { day: today });
@@ -1132,6 +1407,8 @@ app.whenReady().then(() => {
   } catch (e) { console.error('[main] tray init failed', e); }
   // Remove default application menu (we provide custom controls in renderer)
   try { Menu.setApplicationMenu(null); } catch { }
+  screen.on('display-metrics-changed', redockAfterDisplayChange);
+  screen.on('display-removed', redockAfterDisplayChange);
   console.log('[main] rebuilding backlog for today...');
   rebuildBacklogForToday({ includeFuture: false });
   console.log('[main] scheduling ticker for notifications...');

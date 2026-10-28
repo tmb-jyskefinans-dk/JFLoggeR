@@ -1,0 +1,149 @@
+@if (!island.expanded()) {
+  <div class="island-pill island-shoulders island-surface island-outline cursor-pointer"
+    [class.island-idle]="idle()"
+    [class.island-pulse-slot]="pulseKind() === 'slot' || pulseKind() === 'digest'"
+    [class.island-pulse-stale]="pulseKind() === 'stale'"
+    role="button" tabindex="0"
+    [attr.aria-label]="'Udvid log-øen. ' + pendingCount() + ' ventende intervaller. ' + loggedLabel() + ' logget i dag.'"
+    (pointerdown)="onPillPointerDown($event)"
+    (keydown.enter)="expand()" (keydown.space)="$event.preventDefault(); expand()">
+    @if (idle()) {
+      <div class="island-content island-content-idle">
+      <div class="idle-progress" [title]="loggedLabel() + ' logget i dag (' + progressPct() + '%)'">
+        <svg viewBox="0 0 36 36" class="h-4 w-4 -rotate-90" aria-hidden="true">
+          <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="4" class="island-track" />
+          <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"
+            class="island-ring island-ring-color" [attr.stroke-dasharray]="ringCircumference" [attr.stroke-dashoffset]="ringOffset()" />
+        </svg>
+      </div>
+      @if (justLogged()) {
+        <button type="button" class="idle-undo" [style.--undo-duration]="undoWindowMs + 'ms'"
+          aria-label="Fortryd seneste registrering" (pointerdown)="$event.stopPropagation()" (click)="undo()">
+          <svg viewBox="0 0 16 16" class="undo-timer" aria-hidden="true">
+            <circle cx="8" cy="8" r="7" fill="none" stroke-width="2" class="undo-timer-track" />
+            <circle cx="8" cy="8" r="7" fill="none" stroke-width="2" class="undo-timer-bar" />
+          </svg>
+          Fortryd
+        </button>
+      } @else {
+        <time class="idle-next" [title]="nextLogTitle()" [attr.aria-label]="nextLogTitle()">
+          @if (nextLog(); as next) {
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3 island-accent" aria-hidden="true"><path d="M7 4l6 6-6 6"/></svg>
+            <span class="text-sm font-semibold tabular-nums">{{ next.time }}</span>
+            <span class="idle-countdown tabular-nums">{{ next.minutesUntil }}m</span>
+          } @else {
+            <span class="text-xs font-semibold island-muted">Fri</span>
+          }
+        </time>
+      }
+      <span class="idle-total" [title]="loggedLabel() + ' logget i dag'">{{ loggedLabel() }}</span>
+      </div>
+    } @else {
+    <div class="island-content island-content-compact">
+    <div class="relative h-10 w-10 shrink-0" [title]="loggedLabel() + ' logget i dag (' + progressPct() + '%)'">
+      <svg viewBox="0 0 36 36" class="h-10 w-10 -rotate-90" aria-hidden="true">
+        <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" class="island-track" />
+        <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+          class="island-ring island-ring-color"
+          [attr.stroke-dasharray]="ringCircumference" [attr.stroke-dashoffset]="ringOffset()" />
+      </svg>
+      <span class="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tabular-nums">{{ progressPct() }}%</span>
+    </div>
+
+    <div class="min-w-0 flex-1 leading-tight">
+      @if (snackbar.message(); as msg) {
+        <p class="truncate text-xs" role="status" aria-live="polite">{{ msg }}</p>
+      } @else {
+        <p class="text-sm font-semibold tabular-nums">{{ slot().start }}–{{ slot().end }}</p>
+        <p class="truncate text-[11px] island-muted tabular-nums">
+          {{ inWorkHours() ? slot().minutesLeft + ' min tilbage' : 'Uden for arbejdstid' }} · {{ loggedLabel() }} i dag
+        </p>
+      }
+    </div>
+
+    @if (justLogged()) {
+      <button type="button" (pointerdown)="$event.stopPropagation()" (click)="undo()"
+        [style.--undo-duration]="undoWindowMs + 'ms'" aria-label="Fortryd seneste registrering"
+        class="island-chip island-chip-success shrink-0">
+        <svg viewBox="0 0 16 16" class="undo-timer" aria-hidden="true">
+          <circle cx="8" cy="8" r="7" fill="none" stroke-width="2" class="undo-timer-track" />
+          <circle cx="8" cy="8" r="7" fill="none" stroke-width="2" class="undo-timer-bar" />
+        </svg>
+        Fortryd
+      </button>
+    } @else if (canSameAgain()) {
+      <button #sameAgainBtn type="button" (pointerdown)="$event.stopPropagation()" (click)="sameAgain()"
+        (keydown.enter)="$event.stopPropagation()" (keydown.space)="$event.stopPropagation()"
+        [title]="sameAgainTitle()" [attr.aria-label]="sameAgainTitle()"
+        class="island-chip island-chip-neutral max-w-[170px]">
+        <span aria-hidden="true">↻</span>
+        <span class="truncate">{{ lastEntry()?.description }}</span>
+        <kbd class="island-kbd" aria-hidden="true">↵</kbd>
+      </button>
+    }
+
+    <button #otherBtn type="button" (pointerdown)="$event.stopPropagation()" (click)="logOther()"
+      (keydown.enter)="$event.stopPropagation()" (keydown.space)="$event.stopPropagation()"
+      title="Log noget andet (åbner stor visning)" aria-label="Log noget andet"
+      class="island-chip island-chip-neutral shrink-0">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" class="h-3.5 w-3.5" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+      Ny
+    </button>
+
+    @if (pendingCount() > 0) {
+      <span class="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full px-2 text-xs font-bold tabular-nums"
+        [class]="pulseKind() === 'stale' ? 'bg-amber-400 text-black' : 'bg-indigo-500 text-white'"
+        [attr.aria-label]="pendingCount() + ' ventende intervaller'">{{ pendingCount() }}</span>
+    }
+    </div>
+    }
+  </div>
+} @else {
+  <div class="island-expanded-frame island-shoulders island-surface island-outline"
+    [class.from-idle]="idle()"
+    [class.island-morph-in]="!island.collapsing()"
+    [class.island-morph-out]="island.collapsing()"
+    [class.island-morphing]="morphing()"
+    (animationstart)="onMorphStart($event)" (animationend)="onMorphEnd($event)">
+  <div class="island-panel bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200 select-text">
+    <div #panelContent class="island-panel-content">
+      <header class="island-surface island-panel-header flex h-14 items-center gap-3 pl-3 pr-2 select-none cursor-grab active:cursor-grabbing"
+        (pointerdown)="onHeaderPointerDown($event)">
+        <div class="relative h-9 w-9 shrink-0" [title]="loggedLabel() + ' logget i dag'">
+          <svg viewBox="0 0 36 36" class="h-9 w-9 -rotate-90" aria-hidden="true">
+            <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" class="island-track" />
+            <circle cx="18" cy="18" [attr.r]="ringRadius" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+              class="island-ring island-ring-color"
+              [attr.stroke-dasharray]="ringCircumference" [attr.stroke-dashoffset]="ringOffset()" />
+          </svg>
+          <span class="absolute inset-0 flex items-center justify-center text-[9px] font-semibold tabular-nums">{{ progressPct() }}%</span>
+        </div>
+        <div class="min-w-0 flex-1 leading-tight">
+          <p class="text-sm font-semibold">{{ island.manual() ? 'Manuel registrering' : 'Registrér tid' }}</p>
+          <p class="truncate text-[11px] island-muted tabular-nums">
+            Nu {{ slot().start }}–{{ slot().end }} · {{ loggedLabel() }} i dag · {{ pendingCount() }} ventende
+          </p>
+        </div>
+        <div class="flex items-center gap-1" (pointerdown)="$event.stopPropagation()">
+          <button type="button" (click)="toggleManual()" [attr.aria-pressed]="island.manual()"
+            class="island-header-btn" [title]="island.manual() ? 'Vis ventende intervaller (Alt+L)' : 'Manuel registrering (Alt+M)'">
+            {{ island.manual() ? 'Ventende' : 'Manuel' }}
+          </button>
+          <button type="button" (click)="island.detach()" class="island-header-btn" title="Åbn fuld visning" aria-label="Åbn fuld visning">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4" aria-hidden="true"><path d="M8 4H4v12h12v-4M11 4h5v5M16 4l-7 7"/></svg>
+          </button>
+          <button type="button" (click)="island.collapse()" class="island-header-btn" title="Fold sammen (Esc)" aria-label="Fold sammen">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4" aria-hidden="true"><path d="M6 12l4-4 4 4"/></svg>
+          </button>
+        </div>
+      </header>
+
+      @if (island.manual()) {
+        <log-dialog variant="inline" [manualMode]="true" [manualInitialDate]="clock.today()" (closed)="island.collapse()" />
+      } @else {
+        <log-dialog variant="inline" [openedFromNotification]="island.openedFromPrompt()" [prefillPrevious]="island.prefill()" (closed)="island.collapse()" />
+      }
+    </div>
+  </div>
+  </div>
+}

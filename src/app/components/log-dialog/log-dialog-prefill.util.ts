@@ -31,3 +31,20 @@ export function findAdjacentPreviousEntry(
 
   return entries.find((entry) => `${entry.day}T${entry.start}` === previousSlotKey) ?? null;
 }
+
+/** Adjacent previous entry, else the latest entry earlier the same day. */
+export function findPrefillEntry(
+  slotKey: string,
+  entries: SlotEntry[],
+  slotMinutes: number
+): SlotEntry | null {
+  const adjacent = findAdjacentPreviousEntry(slotKey, entries, slotMinutes);
+  if (adjacent) return adjacent;
+  const [day, time] = slotKey.split('T');
+  let best: SlotEntry | null = null;
+  for (const entry of entries) {
+    if (entry.day !== day || !time || entry.start >= time || !entry.description || !entry.category) continue;
+    if (!best || entry.start > best.start) best = entry;
+  }
+  return best;
+}

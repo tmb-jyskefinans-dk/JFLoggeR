@@ -51,6 +51,7 @@ export class SettingsComponent {
     auto_start_on_login: false,
     group_notifications: true,
     minimize_after_notification_submit: false,
+    island_os_notifications: false,
     jira_log_on_afstem: false
   });
 
@@ -121,6 +122,7 @@ export class SettingsComponent {
         (!!s.auto_start_on_login !== !!v.auto_start_on_login) ||
           (!!s.group_notifications !== !!v.group_notifications) ||
           (!!s.minimize_after_notification_submit !== !!v.minimize_after_notification_submit) ||
+          (!!s.island_os_notifications !== !!v.island_os_notifications) ||
           (!!s.jira_log_on_afstem !== !!v.jira_log_on_afstem);
   });
 
@@ -167,6 +169,7 @@ export class SettingsComponent {
       auto_start_on_login: !!s.auto_start_on_login,
       group_notifications: !!s.group_notifications,
       minimize_after_notification_submit: !!s.minimize_after_notification_submit,
+      island_os_notifications: !!s.island_os_notifications,
       jira_log_on_afstem: !!s.jira_log_on_afstem
     });
   }
@@ -189,6 +192,7 @@ export class SettingsComponent {
       auto_start_on_login: raw.auto_start_on_login,
       group_notifications: raw.group_notifications,
       minimize_after_notification_submit: raw.minimize_after_notification_submit,
+      island_os_notifications: raw.island_os_notifications,
       jira_log_on_afstem: raw.jira_log_on_afstem
     };
     try {

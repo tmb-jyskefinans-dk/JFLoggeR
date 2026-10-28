@@ -67,6 +67,14 @@ export interface JiraIdentityResult {
   error?: string;
 }
 
+export type WindowMode = 'compact' | 'expanded' | 'detached';
+export type PointerDragKind = 'move' | 'resize-e' | 'resize-s' | 'resize-se';
+export interface IslandPulse { kind: 'slot' | 'stale' | 'digest'; slot?: string; at: number; }
+
+function isWindowMode(v: unknown): v is WindowMode {
+  return v === 'compact' || v === 'expanded' || v === 'detached';
+}
+
 declare global {
   interface Window {
     workApi: {
@@ -101,6 +109,14 @@ declare global {
       jiraGetLoggedWorklogs?(day: string): Promise<{ ok: boolean; items?: JiraLoggedWorklogPreview[]; error?: string }>;
       jiraUnsetAfstemt?(day: string): Promise<JiraUnsetAfstemtResult>;
       jiraVerifyIdentity?(payload?: { psaKey?: string }): Promise<JiraIdentityResult>;
+      getIslandMode?(): Promise<{ mode: string }>;
+      setIslandMode?(mode: WindowMode, opts?: { focus?: boolean }): Promise<{ ok: boolean; mode: string }>;
+      resizeIsland?(height: number): Promise<{ ok: boolean }>;
+      setIslandCompactIdle?(idle: boolean): Promise<{ ok: boolean }>;
+      pointerDrag?(phase: 'start' | 'move' | 'end', kind?: PointerDragKind): void;
+      onWindowMode?(cb: (d: { mode: string }) => void): (() => void) | void;
+      onIslandPulse?(cb: (d: { kind: string; slot?: string }) => void): (() => void) | void;
+      onSnapHint?(cb: (d: { active: boolean }) => void): (() => void) | void;
     };
   }
 }
@@ -121,6 +137,9 @@ export class IpcService {
   windowMaximized = signal<boolean>(false);
   bulkSelectAllFlag = signal(false);
   dayExported = signal<Map<string, boolean>>(new Map());
+  windowMode = signal<WindowMode>('compact');
+  islandPulse = signal<IslandPulse | null>(null);
+  snapHint = signal(false);
   private latestLoadDayRequest = 0;
 
   constructor() {
@@ -146,6 +165,13 @@ export class IpcService {
       });
       window.workApi.onQueueUpdated?.(() => this.loadPending());
       window.workApi.onMaximizeState?.((s) => this.windowMaximized.set(!!s.maximized));
+      window.workApi.getIslandMode?.().then((r) => { if (isWindowMode(r?.mode)) this.windowMode.set(r.mode); });
+      window.workApi.onWindowMode?.((d) => { if (isWindowMode(d?.mode)) this.windowMode.set(d.mode); });
+      window.workApi.onSnapHint?.((d) => this.snapHint.set(!!d?.active));
+      window.workApi.onIslandPulse?.((d) => {
+        const kind = d?.kind === 'stale' || d?.kind === 'digest' ? d.kind : 'slot';
+        this.islandPulse.set({ kind, slot: typeof d?.slot === 'string' ? d.slot : undefined, at: Date.now() });
+      });
       (window.workApi as any).onNavigateToday?.((day: string) => {
         if (day) router.navigate(['/summary', day]);
       });
@@ -334,6 +360,16 @@ export class IpcService {
     });
   }
   closeWindow() { return window.workApi.closeWindow?.(); }
+
+  setWindowMode(mode: WindowMode, opts?: { focus?: boolean }) {
+    this.windowMode.set(mode);
+    return window.workApi.setIslandMode?.(mode, opts)
+      .then((r) => { if (isWindowMode(r?.mode)) this.windowMode.set(r.mode); })
+      .catch((err) => console.error('[ipc] setWindowMode failed', err));
+  }
+  resizeIsland(height: number) { return window.workApi.resizeIsland?.(height); }
+  setIslandCompactIdle(idle: boolean) { return window.workApi.setIslandCompactIdle?.(idle); }
+  pointerDrag(phase: 'start' | 'move' | 'end', kind?: PointerDragKind) { window.workApi.pointerDrag?.(phase, kind); }
 
   setDayExported(day: string, exported: boolean) {
     if (!day || !window.workApi.setExternalLogged) return Promise.resolve();

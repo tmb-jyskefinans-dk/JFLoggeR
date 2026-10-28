@@ -83,6 +83,28 @@ contextBridge.exposeInMainWorld('workApi', {
     return () => ipcRenderer.removeListener('window:maximize-state', handler);
   }
   ,
+  // Dynamic island window modes
+  getIslandMode: () => ipcRenderer.invoke('island:get-mode'),
+  setIslandMode: (mode: string, opts?: { focus?: boolean }) => ipcRenderer.invoke('island:set-mode', { mode, focus: !!opts?.focus }),
+  resizeIsland: (height: number) => ipcRenderer.invoke('island:resize', { height }),
+  setIslandCompactIdle: (idle: boolean) => ipcRenderer.invoke('island:set-compact-idle', { idle }),
+  pointerDrag: (phase: 'start' | 'move' | 'end', kind?: string) => ipcRenderer.send('window:pointer-drag', { phase, kind }),
+  onWindowMode: (cb: (d: { mode: string }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: { mode: string }) => cb(d);
+    ipcRenderer.on('window:mode', handler);
+    return () => ipcRenderer.removeListener('window:mode', handler);
+  },
+  onIslandPulse: (cb: (d: { kind: string; slot?: string }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: { kind: string; slot?: string }) => cb(d);
+    ipcRenderer.on('island:pulse', handler);
+    return () => ipcRenderer.removeListener('island:pulse', handler);
+  },
+  onSnapHint: (cb: (d: { active: boolean }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, d: { active: boolean }) => cb(d);
+    ipcRenderer.on('island:snap-hint', handler);
+    return () => ipcRenderer.removeListener('island:snap-hint', handler);
+  }
+  ,
   // Logging bridge
   logWrite: (level: string, message: string, meta?: any) => ipcRenderer.invoke('log:write', { level, message, meta })
 });

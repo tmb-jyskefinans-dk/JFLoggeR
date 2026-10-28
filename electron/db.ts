@@ -32,6 +32,10 @@ export type Settings = {
   jira_psa_key?: string; // Jira PSA key for API access
   jira_project_key?: string; // Jira project key for autocomplete queries
   jira_log_on_afstem?: boolean; // automatically post Jira worklogs when marking a day as afstemt
+  window_mode?: 'docked' | 'detached'; // last used window mode, restored on startup
+  detached_bounds?: { x: number; y: number; width: number; height: number } | null;
+  dock_center_ratio?: number; // horizontal island position along the top edge (0..1)
+  island_os_notifications?: boolean; // also show OS toasts while the island is visible
 };
 
 export type JiraLoggedWorklog = {
@@ -66,7 +70,11 @@ const DEFAULT_SETTINGS: Settings = {
   minimize_after_notification_submit: false,
   jira_psa_key: '',
   jira_project_key: '',
-  jira_log_on_afstem: false
+  jira_log_on_afstem: false,
+  window_mode: 'docked',
+  detached_bounds: null,
+  dock_center_ratio: 0.5,
+  island_os_notifications: false
 };
 
 let db: LowSync<Data>;
@@ -135,6 +143,10 @@ export function initDb() {
     if (typeof db.data.settings.jira_psa_key !== 'string') { db.data.settings.jira_psa_key = DEFAULT_SETTINGS.jira_psa_key!; changed = true; }
     if (typeof db.data.settings.jira_project_key !== 'string') { db.data.settings.jira_project_key = DEFAULT_SETTINGS.jira_project_key!; changed = true; }
     if (typeof db.data.settings.jira_log_on_afstem !== 'boolean') { db.data.settings.jira_log_on_afstem = DEFAULT_SETTINGS.jira_log_on_afstem!; changed = true; }
+    if (db.data.settings.window_mode !== 'docked' && db.data.settings.window_mode !== 'detached') { db.data.settings.window_mode = DEFAULT_SETTINGS.window_mode; changed = true; }
+    if (db.data.settings.detached_bounds === undefined) { db.data.settings.detached_bounds = null; changed = true; }
+    if (typeof db.data.settings.dock_center_ratio !== 'number' || !Number.isFinite(db.data.settings.dock_center_ratio)) { db.data.settings.dock_center_ratio = 0.5; changed = true; }
+    if (typeof db.data.settings.island_os_notifications !== 'boolean') { db.data.settings.island_os_notifications = DEFAULT_SETTINGS.island_os_notifications!; changed = true; }
   }
   if (typeof db.data._seq !== 'number') { db.data._seq = 1; changed = true; }
   if (!Array.isArray(db.data.entries)) { db.data.entries = []; changed = true; }
@@ -152,6 +164,7 @@ export function getSettings(): Settings {
 export function saveSettings(s: Settings) {
   ensureDb();
   db.read();
+  const prev = db.data!.settings;
   db.data!.settings = {
     work_start: s.work_start,
     work_end: s.work_end,
@@ -168,8 +181,23 @@ export function saveSettings(s: Settings) {
     minimize_after_notification_submit: !!s.minimize_after_notification_submit,
     jira_psa_key: String(s.jira_psa_key ?? '').trim(),
     jira_project_key: String(s.jira_project_key ?? '').trim().toUpperCase(),
-    jira_log_on_afstem: !!s.jira_log_on_afstem
+    jira_log_on_afstem: !!s.jira_log_on_afstem,
+    // Window state is owned by the main process; keep it unless explicitly provided.
+    window_mode: s.window_mode === 'detached' || s.window_mode === 'docked' ? s.window_mode : (prev?.window_mode ?? 'docked'),
+    detached_bounds: s.detached_bounds !== undefined ? s.detached_bounds : (prev?.detached_bounds ?? null),
+    dock_center_ratio: typeof s.dock_center_ratio === 'number' ? s.dock_center_ratio : (prev?.dock_center_ratio ?? 0.5),
+    island_os_notifications: s.island_os_notifications !== undefined ? !!s.island_os_notifications : !!prev?.island_os_notifications
   };
+  db.write();
+}
+
+export function updateWindowState(patch: Pick<Settings, 'window_mode' | 'detached_bounds' | 'dock_center_ratio'>) {
+  ensureDb();
+  db.read();
+  const s = db.data!.settings;
+  if (patch.window_mode !== undefined) s.window_mode = patch.window_mode;
+  if (patch.detached_bounds !== undefined) s.detached_bounds = patch.detached_bounds;
+  if (patch.dock_center_ratio !== undefined) s.dock_center_ratio = patch.dock_center_ratio;
   db.write();
 }
 

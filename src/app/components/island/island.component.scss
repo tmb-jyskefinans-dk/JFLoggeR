@@ -1,0 +1,207 @@
+// iOS-like spring; durations must match MORPH_MS (component) and COLLAPSE_ANIMATION_MS (service).
+$spring: cubic-bezier(0.32, 0.72, 0, 1);
+$morph: 0.38s;
+$collapse: 0.26s;
+$collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+// Pill/panel widths are the Electron window widths (electron/island.ts) minus the 2×12px shoulders.
+.island-pill {
+  position: relative;
+  margin: 0 auto;
+  display: flex;
+  width: 524px;
+  height: 60px;
+  border-radius: 0 0 22px 22px;
+  transition: width $morph $spring, height $morph $spring, border-radius $morph $spring;
+
+  &.island-idle {
+    width: 180px;
+    height: 30px;
+    border-radius: 0 0 14px 14px;
+  }
+}
+
+.island-content {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  animation: island-content-in 0.24s ease-out 0.1s both;
+}
+.island-content-compact { gap: 12px; padding: 0 8px 0 10px; }
+.island-content-idle { gap: 8px; padding: 0 12px; justify-content: space-between; }
+
+.island-expanded-frame {
+  --morph-w: 524px;
+  --morph-h: 60px;
+  --morph-r: 22px;
+  position: relative;
+  margin: 0 auto;
+  width: 776px;
+  border-radius: 0 0 22px 22px;
+
+  &.from-idle {
+    --morph-w: 180px;
+    --morph-h: 30px;
+    --morph-r: 14px;
+  }
+}
+
+.island-panel {
+  max-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 0 0 22px 22px;
+}
+.island-morphing .island-panel { overflow: hidden; }
+// Fixed width so the form does not reflow while the frame morphs.
+.island-panel-content { width: 776px; margin-left: calc((100% - 776px) / 2); }
+
+.island-morph-in { animation: island-frame-in $morph $spring both; }
+.island-morph-in .island-panel { animation: island-panel-in $morph $spring both; }
+.island-morph-in .island-panel-content { animation: island-content-in 0.24s ease-out 0.12s both; }
+.island-morph-out { animation: island-frame-out $collapse $collapse-ease both; }
+.island-morph-out .island-panel { animation: island-panel-out $collapse $collapse-ease both; }
+.island-morph-out .island-panel-content { animation: island-content-out 0.12s ease-in both; }
+
+@keyframes island-frame-in {
+  from { width: var(--morph-w); border-radius: 0 0 var(--morph-r) var(--morph-r); }
+  to { width: 776px; border-radius: 0 0 22px 22px; }
+}
+@keyframes island-panel-in {
+  from { max-height: var(--morph-h); border-radius: 0 0 var(--morph-r) var(--morph-r); }
+  to { max-height: 100vh; border-radius: 0 0 22px 22px; }
+}
+@keyframes island-frame-out {
+  from { width: 776px; border-radius: 0 0 22px 22px; }
+  to { width: var(--morph-w); border-radius: 0 0 var(--morph-r) var(--morph-r); }
+}
+@keyframes island-panel-out {
+  from { max-height: 100vh; border-radius: 0 0 22px 22px; }
+  to { max-height: var(--morph-h); border-radius: 0 0 var(--morph-r) var(--morph-r); }
+}
+@keyframes island-content-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes island-content-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.island-shoulders::before,
+.island-shoulders::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.island-shoulders::before {
+  left: -12px;
+  background: radial-gradient(circle at 0 100%, transparent 12px, var(--island-fill) 12.5px);
+}
+
+.island-shoulders::after {
+  right: -12px;
+  background: radial-gradient(circle at 100% 100%, transparent 12px, var(--island-fill) 12.5px);
+}
+
+.island-panel-header { border-bottom: 1px solid var(--island-divider); }
+.island-track { color: var(--island-track); }
+.island-ring-color { color: var(--island-ring-color); }
+.island-accent { color: var(--island-accent); }
+.idle-progress { flex: 0 0 16px; }
+.idle-total { font-size: 10px; color: var(--island-muted); white-space: nowrap; }
+.idle-undo { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--island-success); }
+
+// Ring empties over the undo window; circumference of r=7 is 2π·7 ≈ 43.98.
+.undo-timer { width: 14px; height: 14px; flex: none; transform: rotate(-90deg); }
+.undo-timer-track { stroke: currentColor; opacity: 0.25; }
+.undo-timer-bar {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: 43.98;
+  animation: undo-deplete var(--undo-duration, 6s) linear forwards;
+}
+@keyframes undo-deplete {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 43.98; }
+}
+.idle-next { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.idle-countdown { font-size: 10px; font-weight: 600; color: var(--island-accent); }
+
+.island-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2rem;
+  padding: 0 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+
+  &:active { transform: scale(0.96); }
+  &:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+}
+
+.island-chip-neutral {
+  background: var(--island-subtle);
+  color: var(--island-fg);
+  &:hover { background: var(--island-subtle-strong); }
+}
+
+// Focused chip shows it is the Enter default after a slot nudge.
+.island-chip:focus { box-shadow: 0 0 0 2px var(--island-accent); outline: none; }
+.island-kbd { display: none; font-family: inherit; font-size: 10px; opacity: 0.7; }
+.island-chip:focus .island-kbd { display: inline; }
+
+.island-chip-success {
+  background: var(--island-success-bg);
+  color: var(--island-success);
+}
+
+.island-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--island-muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover { background: var(--island-subtle-strong); color: var(--island-fg); }
+  &[aria-pressed='true'] { background: var(--island-active-bg); color: var(--island-active-fg); }
+  &:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+}
+
+.island-pill:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+
+.island-ring { transition: stroke-dashoffset 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
+
+.island-pulse-slot { animation: island-pulse-slot 1.2s ease-out 3; }
+.island-pulse-stale { animation: island-pulse-stale 1.2s ease-out 3; }
+
+@keyframes island-pulse-slot {
+  0%, 100% { --island-fill: var(--island-bg); }
+  35% { --island-fill: var(--island-pulse); }
+}
+@keyframes island-pulse-stale {
+  0%, 100% { --island-fill: var(--island-bg); }
+  35% { --island-fill: var(--island-pulse-stale); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-content, .island-morph-in, .island-morph-out, .island-morph-in .island-panel, .island-morph-out .island-panel,
+  .island-morph-in .island-panel-content, .island-morph-out .island-panel-content,
+  .island-pulse-slot, .island-pulse-stale { animation: none; }
+  .island-pill, .island-ring { transition: none; }
+}

@@ -3,7 +3,7 @@ import { CATEGORY_GROUPS, CategoryGroup } from '../../models/categories';
 import { IpcService, JiraIssueSuggestion } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
 import { preserveCategoryDescriptions } from '../shared/category-description.util';
-import { findAdjacentPreviousEntry } from './log-dialog-prefill.util';
+import { findPrefillEntry } from './log-dialog-prefill.util';
 
 @Component({
   selector: 'log-dialog',
@@ -20,6 +20,9 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   openedFromNotification = input(false);
   manualMode = input(false);
   manualInitialDate = input<string>('');
+  variant = input<'modal' | 'inline'>('modal');
+  prefillPrevious = input(true);
+  inline = computed(() => this.variant() === 'inline');
 
   ipc = inject(IpcService);
 
@@ -427,13 +430,14 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private prefillFromAdjacentPreviousSlot(slotKey: string) {
+    if (!this.prefillPrevious()) return;
     const [day] = slotKey.split('T');
     const slotMinutes = this.ipc.settings()?.slot_minutes ?? 15;
 
     void window.workApi.getDayEntries(day).then((entries: Array<{ day: string; start: string; description: string; category: string }>) => {
       if (this.description().trim() || this.category().trim() || this.andetDescription().trim()) return;
 
-      const previousEntry = findAdjacentPreviousEntry(slotKey, entries, slotMinutes);
+      const previousEntry = findPrefillEntry(slotKey, entries, slotMinutes);
       if (!previousEntry) return;
 
       this.category.set(previousEntry.category);

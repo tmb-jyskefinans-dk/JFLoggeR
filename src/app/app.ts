@@ -1,16 +1,18 @@
-import { Component, effect, inject, signal, ChangeDetectionStrategy, OnDestroy } from '@angular/core';
-import { RouterLink, RouterOutlet, Router } from '@angular/router';
+import { Component, effect, inject, signal, ChangeDetectionStrategy, OnDestroy, untracked } from '@angular/core';
+import { RouterLink, RouterLinkActive, RouterOutlet, Router } from '@angular/router';
 import { WindowControlsComponent } from './components/window-controls/window-controls.component';
-import { IpcService } from './services/ipc.service';
+import { IpcService, PointerDragKind } from './services/ipc.service';
 import { ClockService } from './services/clock.service';
 import { LogDialogComponent } from './components/log-dialog/log-dialog.component';
 import { ThemeService } from './services/theme.service';
 import { SnackbarService } from './services/snackbar.service';
+import { IslandService } from './services/island.service';
+import { IslandComponent } from './components/island/island.component';
 
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, RouterOutlet, LogDialogComponent, WindowControlsComponent],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet, LogDialogComponent, WindowControlsComponent, IslandComponent],
   templateUrl: "./app.component.html",
   styleUrls: []
 })
@@ -29,6 +31,8 @@ export class AppComponent implements OnDestroy {
   handledPromptSlot = signal<string|null>(null);
   theme = inject(ThemeService);
   snackbar = inject(SnackbarService);
+  island = inject(IslandService);
+  docked = this.island.docked;
   private removeDialogOpenLogListener?: () => void;
   private removeDialogOpenLogAllListener?: () => void;
 
@@ -48,6 +52,10 @@ export class AppComponent implements OnDestroy {
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
     if (!ev.altKey) return;
     const key = ev.key.toLowerCase();
+    if (this.docked()) {
+      this.onDockedShortcut(ev, key);
+      return;
+    }
     switch (key) {
       case 'm': // manual log popup
         ev.preventDefault();
@@ -94,6 +102,13 @@ export class AppComponent implements OnDestroy {
       if (!slot) return;
       const source = this.ipc.lastPromptSource();
       const shouldMinimizeAfterSubmit = source === 'notification' || source === 'auto-focus';
+      if (untracked(() => this.docked())) {
+        if (slot !== this.handledPromptSlot()) {
+          this.handledPromptSlot.set(slot);
+          untracked(() => this.island.nudge());
+        }
+        return;
+      }
       // Only auto-open if different from last handled slot and currently closed
       if (slot !== this.handledPromptSlot() && !this.dialogOpen()) {
         this.dialogOpenedFromNotification.set(shouldMinimizeAfterSubmit);
@@ -106,6 +121,12 @@ export class AppComponent implements OnDestroy {
     try {
       const disposeDialogOpenLog = (window as any).workApi.onDialogOpenLog?.((d?: { slot?: string; source?: string }) => {
         const slot = d?.slot;
+        if (this.docked()) {
+          if (slot) this.handledPromptSlot.set(slot);
+          if (d?.source === 'notification') this.island.nudge();
+          else this.island.expand({ manual: false, focus: true });
+          return;
+        }
         this.dialogOpenedFromNotification.set(d?.source === 'notification' || d?.source === 'auto-focus');
         if (!this.dialogOpen()) {
           this.dialogOpen.set(true);
@@ -118,6 +139,10 @@ export class AppComponent implements OnDestroy {
         this.removeDialogOpenLogListener = disposeDialogOpenLog;
       }
       const disposeDialogOpenLogAll = (window as any).workApi.onDialogOpenLogAll?.(() => {
+        if (this.docked()) {
+          this.island.expand({ manual: false, focus: true });
+          return;
+        }
         // Force open dialog; selection will be handled in LogDialog ngOnInit via bulkSelectAllFlag.
         if (!this.dialogOpen()) this.dialogOpen.set(true); else {
           // If already open we can retrigger by closing & reopening or simply rely on user adjusting selection; keep open.
@@ -163,6 +188,26 @@ export class AppComponent implements OnDestroy {
     this.manualDialogDate.set(this.getCurrentDay());
     this.openManualDialog();
     this.closeMenu();
+  }
+
+  startResize(ev: PointerEvent, kind: PointerDragKind) {
+    this.island.beginPointerDrag(ev, kind);
+  }
+
+  private onDockedShortcut(ev: KeyboardEvent, key: string) {
+    const routes: Record<string, unknown[]> = {
+      s: ['/summary', this.clock.today()],
+      t: ['/today'],
+      i: ['/settings']
+    };
+    if (key === 'l' || key === 'm') {
+      ev.preventDefault();
+      this.island.expand({ manual: key === 'm', focus: true });
+    } else if (routes[key]) {
+      ev.preventDefault();
+      this.island.detach();
+      this.router.navigate(routes[key]);
+    }
   }
 
   ngOnDestroy() {

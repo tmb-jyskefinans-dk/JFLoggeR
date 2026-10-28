@@ -18,4 +18,87 @@ html.theme-transition, html.theme-transition * {
 	transition: background-color .25s ease, color .25s ease, border-color .25s ease, fill .25s ease, stroke .25s ease;
 }
 
+/* The Electron window is transparent; only the island / app shell paint a surface. */
+html, body {
+	background: transparent;
+	overflow: hidden;
+	height: 100%;
+}
+
+/* Island theme tokens: light surfaces get a hairline outline instead of relying on contrast. */
+:root {
+	--island-bg: #ffffff;
+	--island-fg: #0f172a;
+	--island-muted: rgb(15 23 42 / 0.55);
+	--island-subtle: rgb(15 23 42 / 0.06);
+	--island-subtle-strong: rgb(15 23 42 / 0.12);
+	--island-track: rgb(15 23 42 / 0.12);
+	--island-divider: rgb(226 232 240);
+	--island-outline: drop-shadow(0 0 0.6px rgb(15 23 42 / 0.55)) drop-shadow(0 1px 1px rgb(15 23 42 / 0.08));
+	--island-ring-color: #10b981;
+	--island-accent: #4f46e5;
+	--island-success: #047857;
+	--island-success-bg: rgb(16 185 129 / 0.14);
+	--island-pulse: #e0e7ff;
+	--island-pulse-stale: #fef3c7;
+	--island-active-bg: #0f172a;
+	--island-active-fg: #ffffff;
+}
+html.dark {
+	--island-bg: #000000;
+	--island-fg: #ffffff;
+	--island-muted: rgb(255 255 255 / 0.55);
+	--island-subtle: rgb(255 255 255 / 0.1);
+	--island-subtle-strong: rgb(255 255 255 / 0.18);
+	--island-track: rgb(255 255 255 / 0.14);
+	--island-divider: transparent;
+	--island-outline: none;
+	--island-ring-color: #34d399;
+	--island-accent: #a5b4fc;
+	--island-success: #6ee7b7;
+	--island-success-bg: rgb(16 185 129 / 0.16);
+	--island-pulse: #262626;
+	--island-pulse-stale: #3a2a08;
+	--island-active-bg: #ffffff;
+	--island-active-fg: #0f172a;
+}
+
+/* Registered so pulse keyframes can animate the fill shared by the pill and its shoulders. */
+@property --island-fill {
+	syntax: '<color>';
+	inherits: true;
+	initial-value: #000000;
+}
+
+.island-surface {
+	--island-fill: var(--island-bg);
+	background-color: var(--island-fill);
+	color: var(--island-fg);
+}
+.island-outline { filter: var(--island-outline); }
+.island-muted { color: var(--island-muted); }
+.island-bordered { box-shadow: 0 0 0 1px var(--island-subtle-strong), 0 10px 24px -12px rgb(15 23 42 / 0.35); }
+html.dark .island-bordered { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 10px 24px -12px rgb(0 0 0 / 0.6); }
+
+.app-drag { -webkit-app-region: drag; }
+.app-no-drag { -webkit-app-region: no-drag; }
+
+.app-shell-floating {
+	border-radius: 22px;
+	border: 1px solid rgb(148 163 184 / 0.35);
+}
+
+.island-nav a {
+	display: inline-flex;
+	align-items: center;
+	height: 2rem;
+	padding: 0 0.875rem;
+	border-radius: 9999px;
+	color: var(--island-muted);
+	transition: background-color .15s ease, color .15s ease;
+}
+.island-nav a:hover { color: var(--island-fg); background: var(--island-subtle); }
+.island-nav a.island-nav-active { color: var(--island-active-fg); background: var(--island-active-bg); }
+.island-nav a:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+
 
