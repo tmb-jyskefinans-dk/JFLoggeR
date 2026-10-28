@@ -129,6 +129,7 @@ process.on('unhandledRejection', (reason) => {
     handleFatalProcessError('unhandledRejection', reason);
 });
 const db_1 = require("./db");
+const flex_1 = require("./flex");
 const island_1 = require("./island");
 const stale_1 = require("./stale");
 const db_2 = require("./db");
@@ -791,6 +792,25 @@ electron_1.ipcMain.handle('db:get-summary', (_e, day) => {
     catch (e) {
         logIpcFailure('db:get-summary', e);
         throw e;
+    }
+});
+electron_1.ipcMain.handle('stats:flex-balance', () => {
+    try {
+        const settings = (0, db_1.getSettings)();
+        if (!settings.flex_enabled)
+            return { enabled: false };
+        const now = new Date();
+        const balance = (0, flex_1.computeFlexBalance)((0, db_1.getAllEntries)(), settings, {
+            today: (0, time_1.toLocalDateYMD)(now),
+            nowMinutes: now.getHours() * 60 + now.getMinutes(),
+            fromDay: settings.flex_start_date || undefined,
+            excludeFlexCategory: settings.flex_exclude_andet !== false
+        });
+        return { enabled: true, ...balance };
+    }
+    catch (e) {
+        logIpcFailure('stats:flex-balance', e);
+        return { enabled: false };
     }
 });
 electron_1.ipcMain.handle('db:get-recent', (_e, limit) => (0, db_1.getDistinctRecent)(limit ?? 20));

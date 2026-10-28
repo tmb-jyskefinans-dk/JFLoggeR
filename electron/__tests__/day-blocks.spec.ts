@@ -1,6 +1,7 @@
 import {
   categoryTotals,
   groupDayBlocks,
+  isoWeek,
   plannedMinutesForDay,
   shiftYmd,
   splitJiraKey
@@ -39,6 +40,13 @@ describe('day blocks util', () => {
   test('splits leading Jira keys', () => {
     expect(splitJiraKey('TEAMJYFWEB-42 - Ny forside')).toEqual({ key: 'TEAMJYFWEB-42', text: 'Ny forside' });
     expect(splitJiraKey('Frokost')).toEqual({ key: '', text: 'Frokost' });
+  });
+
+  test('ISO week numbers follow the Danish calendar', () => {
+    expect(isoWeek('2026-10-28')).toEqual({ year: 2026, week: 44 });
+    expect(isoWeek('2026-11-01')).toEqual({ year: 2026, week: 44 }); // Sunday belongs to the Monday-started week
+    expect(isoWeek('2027-01-01')).toEqual({ year: 2026, week: 53 });
+    expect(isoWeek('2026-01-01')).toEqual({ year: 2026, week: 1 });
   });
 
   test('shifts dates across month boundaries', () => {

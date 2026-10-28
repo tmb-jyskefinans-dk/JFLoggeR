@@ -1,6 +1,11 @@
 /* Day view component: using inline Tailwind utility classes in template */
 :host { display:block; }
 
+.flex-plus { color: rgb(var(--accent-600)); }
+.flex-minus { color: rgb(225 29 72); }
+:host-context(.dark) .flex-plus { color: rgb(var(--accent-300)); }
+:host-context(.dark) .flex-minus { color: rgb(253 164 175); }
+
 .day-nav-btn {
   display: inline-flex;
   align-items: center;

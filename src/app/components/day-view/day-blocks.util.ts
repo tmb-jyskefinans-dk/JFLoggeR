@@ -126,6 +126,16 @@ export function splitJiraKey(description: string): { key: string; text: string }
   return match ? { key: match[1], text: match[2] } : { key: '', text: String(description ?? '') };
 }
 
+/** ISO-8601 week (Monday start, week 1 contains the year's first Thursday) as used on Danish calendars. */
+export function isoWeek(ymd: string): { year: number; week: number } {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const date = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  const weekday = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - weekday);
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1);
+  return { year: date.getUTCFullYear(), week: Math.ceil(((date.getTime() - yearStart) / 86400000 + 1) / 7) };
+}
+
 export function shiftYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split('-').map(Number);
   const date = new Date(y, (m || 1) - 1, (d || 1) + days);

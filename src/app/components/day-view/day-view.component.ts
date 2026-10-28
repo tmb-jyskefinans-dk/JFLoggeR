@@ -13,6 +13,7 @@ import {
   groupDayBlocks,
   missingRowsForDay,
   plannedMinutesForDay,
+  isoWeek,
   shiftYmd,
   splitJiraKey,
   type DayBlock,
@@ -202,6 +203,20 @@ export class DayViewComponent implements OnDestroy {
     return parts.length ? `Fordeling: ${parts.join(', ')}` : 'Ingen registreringer';
   });
 
+  flexEnabled = computed(() => this.ipc.flexBalance().enabled);
+  flexBalanceMinutes = computed(() => this.ipc.flexBalance().balanceMinutes ?? 0);
+  flexDay = computed(() => this.ipc.flexBalance().days?.[this.day()] ?? null);
+  flexTitle = computed(() => {
+    const flex = this.ipc.flexBalance();
+    const from = flex.fromDay ? ` siden ${flex.fromDay}` : '';
+    return `Flex saldo${from}: arbejdet tid minus planlagt tid på dage med registreringer.`;
+  });
+  readonly duration = formatDuration;
+  signedDuration(minutes: number): string {
+    if (!minutes) return '±0m';
+    return `${minutes > 0 ? '+' : '−'}${formatDuration(Math.abs(minutes))}`;
+  }
+
   isToday = computed(() => this.day() === this.clock.today());
   prevDay = computed(() => this.day() ? shiftYmd(this.day(), -1) : '');
   nextDay = computed(() => this.day() ? shiftYmd(this.day(), 1) : '');
@@ -254,11 +269,13 @@ export class DayViewComponent implements OnDestroy {
   });
   daysWithWeekday = computed(() => {
     const slotMinutes = effectiveSlotMinutes(this.settings());
+    const flexDays = this.ipc.flexBalance().days ?? {};
     return this.days().map(d => {
       const [y,m,dd] = d.day.split('-').map(Number);
       const dt = new Date(y,(m||1)-1,dd||1);
       const exported = this.ipc.dayExported().get(d.day) || false;
-      return { ...d, weekday: this.weekdayNames[dt.getDay()], exported, durationLabel: formatDuration(d.slots * slotMinutes) };
+      const flexDelta = flexDays[d.day]?.deltaMinutes ?? null;
+      return { ...d, weekday: this.weekdayNames[dt.getDay()], exported, durationLabel: formatDuration(d.slots * slotMinutes), flexDelta };
     });
   });
 
@@ -271,7 +288,9 @@ export class DayViewComponent implements OnDestroy {
 
   daysByMonth = computed(() => {
     const sorted = [...this.daysWithWeekday()].sort((a, b) => b.day.localeCompare(a.day));
-    const groups = new Map<string, { key: string; label: string; days: typeof sorted }>();
+    type Day = (typeof sorted)[number];
+    type Week = { key: string; label: string; days: Day[]; flexMinutes: number };
+    const groups = new Map<string, { key: string; label: string; days: Day[]; weeks: Week[]; flexMinutes: number }>();
     for (const d of sorted) {
       const key = d.day.slice(0, 7); // YYYY-MM
       if (!groups.has(key)) {
@@ -280,16 +299,27 @@ export class DayViewComponent implements OnDestroy {
           month: 'long',
           year: 'numeric'
         });
-        groups.set(key, { key, label, days: [] });
+        groups.set(key, { key, label, days: [], weeks: [], flexMinutes: 0 });
       }
-      groups.get(key)!.days.push(d);
+      const group = groups.get(key)!;
+      group.days.push(d);
+      group.flexMinutes += d.flexDelta ?? 0;
+      const { year, week } = isoWeek(d.day);
+      const weekKey = `${year}-W${week}`;
+      let target = group.weeks[group.weeks.length - 1];
+      if (target?.key !== weekKey) {
+        target = { key: weekKey, label: `Uge ${week}`, days: [], flexMinutes: 0 };
+        group.weeks.push(target);
+      }
+      target.days.push(d);
+      target.flexMinutes += d.flexDelta ?? 0;
     }
     return Array.from(groups.values());
   });
 
   daysByYear = computed(() => {
     const months = this.daysByMonth();
-    const groups = new Map<string, { key: string; label: string; isPreviousYear: boolean; months: typeof months }>();
+    const groups = new Map<string, { key: string; label: string; isPreviousYear: boolean; months: typeof months; flexMinutes: number }>();
     const currentYear = this.currentYearKey();
     for (const month of months) {
       const yearKey = month.key.slice(0, 4);
@@ -298,10 +328,13 @@ export class DayViewComponent implements OnDestroy {
           key: yearKey,
           label: yearKey,
           isPreviousYear: Number(yearKey) < Number(currentYear),
-          months: []
+          months: [],
+          flexMinutes: 0
         });
       }
-      groups.get(yearKey)!.months.push(month);
+      const year = groups.get(yearKey)!;
+      year.months.push(month);
+      year.flexMinutes += month.flexMinutes;
     }
     return Array.from(groups.values()).sort((a, b) => b.key.localeCompare(a.key));
   });
@@ -325,6 +358,13 @@ export class DayViewComponent implements OnDestroy {
   private resetDeleteOnDayChange = effect(() => {
     this.day();
     untracked(() => this.resetDeleteConfirm());
+  });
+
+  // Today's planned time grows every minute, so keep the balance current while the view is open.
+  private refreshFlexEachMinute = effect(() => {
+    this.clock.currentTime();
+    this.settings();
+    untracked(() => this.ipc.loadFlexBalance());
   });
 
   private keepCurrentMonthExpandedEffect = effect(() => {

@@ -5,6 +5,7 @@ exports.getSettings = getSettings;
 exports.saveSettings = saveSettings;
 exports.updateWindowState = updateWindowState;
 exports.saveEntries = saveEntries;
+exports.getAllEntries = getAllEntries;
 exports.getDayEntries = getDayEntries;
 exports.getDays = getDays;
 exports.getSummary = getSummary;
@@ -49,7 +50,10 @@ const DEFAULT_SETTINGS = {
     window_mode: 'docked',
     detached_bounds: null,
     dock_center_ratio: 0.5,
-    island_os_notifications: false
+    island_os_notifications: false,
+    flex_enabled: true,
+    flex_start_date: '',
+    flex_exclude_andet: true
 };
 let db;
 // Secrets are encrypted with the OS keychain (DPAPI on Windows) so worklogger.json never holds plain tokens.
@@ -207,6 +211,18 @@ function initDb() {
             db.data.settings.island_os_notifications = DEFAULT_SETTINGS.island_os_notifications;
             changed = true;
         }
+        if (typeof db.data.settings.flex_enabled !== 'boolean') {
+            db.data.settings.flex_enabled = DEFAULT_SETTINGS.flex_enabled;
+            changed = true;
+        }
+        if (typeof db.data.settings.flex_start_date !== 'string') {
+            db.data.settings.flex_start_date = DEFAULT_SETTINGS.flex_start_date;
+            changed = true;
+        }
+        if (typeof db.data.settings.flex_exclude_andet !== 'boolean') {
+            db.data.settings.flex_exclude_andet = DEFAULT_SETTINGS.flex_exclude_andet;
+            changed = true;
+        }
     }
     if (typeof db.data._seq !== 'number') {
         db.data._seq = 1;
@@ -266,7 +282,12 @@ function saveSettings(s) {
         window_mode: s.window_mode === 'detached' || s.window_mode === 'docked' ? s.window_mode : (prev?.window_mode ?? 'docked'),
         detached_bounds: s.detached_bounds !== undefined ? s.detached_bounds : (prev?.detached_bounds ?? null),
         dock_center_ratio: typeof s.dock_center_ratio === 'number' ? s.dock_center_ratio : (prev?.dock_center_ratio ?? 0.5),
-        island_os_notifications: s.island_os_notifications !== undefined ? !!s.island_os_notifications : !!prev?.island_os_notifications
+        island_os_notifications: s.island_os_notifications !== undefined ? !!s.island_os_notifications : !!prev?.island_os_notifications,
+        flex_enabled: s.flex_enabled !== undefined ? !!s.flex_enabled : (prev?.flex_enabled ?? DEFAULT_SETTINGS.flex_enabled),
+        flex_start_date: s.flex_start_date === undefined
+            ? (prev?.flex_start_date ?? '')
+            : (/^\d{4}-\d{2}-\d{2}$/.test(String(s.flex_start_date)) ? String(s.flex_start_date) : ''),
+        flex_exclude_andet: s.flex_exclude_andet !== undefined ? !!s.flex_exclude_andet : (prev?.flex_exclude_andet ?? DEFAULT_SETTINGS.flex_exclude_andet)
     };
     db.write();
 }
@@ -326,6 +347,11 @@ function saveEntries(entries) {
     db.data.entries = Array.from(existing.values())
         .sort((a, b) => (a.day === b.day ? a.start.localeCompare(b.start) : a.day.localeCompare(b.day)));
     db.write();
+}
+function getAllEntries() {
+    ensureDb();
+    db.read();
+    return [...db.data.entries];
 }
 function getDayEntries(day) {
     ensureDb();

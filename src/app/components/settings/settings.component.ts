@@ -95,7 +95,10 @@ export class SettingsComponent {
     group_notifications: true,
     minimize_after_notification_submit: false,
     island_os_notifications: false,
-    jira_log_on_afstem: false
+    jira_log_on_afstem: false,
+    flex_enabled: true,
+    flex_start_date: '',
+    flex_exclude_andet: true
   });
   readonly jiraConnections = this.settingsForm.controls.jira_connections;
 
@@ -182,7 +185,10 @@ export class SettingsComponent {
           (!!s.group_notifications !== !!v.group_notifications) ||
           (!!s.minimize_after_notification_submit !== !!v.minimize_after_notification_submit) ||
           (!!s.island_os_notifications !== !!v.island_os_notifications) ||
-          (!!s.jira_log_on_afstem !== !!v.jira_log_on_afstem);
+          (!!s.jira_log_on_afstem !== !!v.jira_log_on_afstem) ||
+          ((s.flex_enabled !== false) !== !!v.flex_enabled) ||
+          ((s.flex_start_date ?? '') !== (v.flex_start_date ?? '')) ||
+          ((s.flex_exclude_andet !== false) !== !!v.flex_exclude_andet);
   });
 
   constructor() {
@@ -233,7 +239,10 @@ export class SettingsComponent {
       group_notifications: !!s.group_notifications,
       minimize_after_notification_submit: !!s.minimize_after_notification_submit,
       island_os_notifications: !!s.island_os_notifications,
-      jira_log_on_afstem: !!s.jira_log_on_afstem
+      jira_log_on_afstem: !!s.jira_log_on_afstem,
+      flex_enabled: s.flex_enabled !== false,
+      flex_start_date: s.flex_start_date ?? '',
+      flex_exclude_andet: s.flex_exclude_andet !== false
     });
   }
 
@@ -266,7 +275,10 @@ export class SettingsComponent {
       group_notifications: raw.group_notifications,
       minimize_after_notification_submit: raw.minimize_after_notification_submit,
       island_os_notifications: raw.island_os_notifications,
-      jira_log_on_afstem: raw.jira_log_on_afstem
+      jira_log_on_afstem: raw.jira_log_on_afstem,
+      flex_enabled: raw.flex_enabled,
+      flex_start_date: raw.flex_start_date,
+      flex_exclude_andet: raw.flex_exclude_andet
     };
     try {
       const resp = await this.ipc.saveSettings(payload);

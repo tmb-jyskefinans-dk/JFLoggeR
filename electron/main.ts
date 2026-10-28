@@ -142,8 +142,10 @@ import {
   getJiraLoggedWorklogs,
   setJiraLoggedWorklogs,
   clearJiraLoggedWorklogs,
+  getAllEntries,
   updateWindowState
 } from './db';
+import { computeFlexBalance } from './flex';
 import {
   WindowMode,
   PointerDragKind,
@@ -765,6 +767,23 @@ ipcMain.handle('db:get-summary', (_e, day: string) => {
   } catch (e) {
     logIpcFailure('db:get-summary', e);
     throw e;
+  }
+});
+ipcMain.handle('stats:flex-balance', () => {
+  try {
+    const settings = getSettings();
+    if (!settings.flex_enabled) return { enabled: false };
+    const now = new Date();
+    const balance = computeFlexBalance(getAllEntries(), settings, {
+      today: toLocalDateYMD(now),
+      nowMinutes: now.getHours() * 60 + now.getMinutes(),
+      fromDay: settings.flex_start_date || undefined,
+      excludeFlexCategory: settings.flex_exclude_andet !== false
+    });
+    return { enabled: true, ...balance };
+  } catch (e) {
+    logIpcFailure('stats:flex-balance', e);
+    return { enabled: false };
   }
 });
 ipcMain.handle('db:get-recent', (_e, limit?: number) =>

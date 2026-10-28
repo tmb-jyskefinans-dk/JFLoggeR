@@ -253,6 +253,38 @@
       </section>
 
       <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
+        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Flex og saldo</h3>
+        <div class="space-y-3">
+          <div class="flex items-start gap-3">
+            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="flex_enabled" aria-describedby="flex-enabled-help">
+              <span class="leading-tight">
+                Vis flex saldo (+/- timer)
+                <span id="flex-enabled-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Sammenligner logget tid med din arbejdsplan og viser saldoen i dagsvisningen. Dage uden registreringer tæller ikke med.</span>
+              </span>
+            </label>
+          </div>
+          @if (settingsForm.controls.flex_enabled.value) {
+            <div class="flex items-start gap-3">
+              <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+                <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="flex_exclude_andet" aria-describedby="flex-andet-help">
+                <span class="leading-tight">
+                  "Andet" er flex og tæller ikke som arbejdstid
+                  <span id="flex-andet-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Tid registreret som <strong>Andet</strong> (fx afspadsering af flex) trækkes fra saldoen i stedet for at tælle som arbejde.</span>
+                </span>
+              </label>
+            </div>
+            <div class="flex flex-col gap-1 pt-1">
+              <label for="flex-start-date" class="text-sm font-medium text-slate-600 dark:text-slate-300">Saldo startdato</label>
+              <input id="flex-start-date" type="date" formControlName="flex_start_date" aria-describedby="flex-start-help"
+                class="w-48 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+              <p id="flex-start-help" class="text-xs text-slate-500 dark:text-slate-400">Saldoen tælles fra denne dato. Tom = fra første registrerede dag.</p>
+            </div>
+          }
+        </div>
+      </section>
+
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
         <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Notifikationer</h3>
         <div class="space-y-3">
           <div class="flex items-start gap-3">

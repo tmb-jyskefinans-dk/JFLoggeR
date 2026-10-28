@@ -79,6 +79,21 @@ export interface JiraConnection {
   email: string;
 }
 
+export interface FlexDay {
+  plannedMinutes: number;
+  workedMinutes: number;
+  outsideScheduleMinutes: number;
+  flexMinutes: number;
+  deltaMinutes: number;
+}
+
+export interface FlexBalance {
+  enabled: boolean;
+  balanceMinutes?: number;
+  fromDay?: string;
+  days?: Record<string, FlexDay>;
+}
+
 export type WindowMode = 'compact' | 'expanded' | 'detached';
 export type PointerDragKind = 'move' | 'resize-e' | 'resize-s' | 'resize-se';
 export interface IslandPulse { kind: 'slot' | 'stale' | 'digest'; slot?: string; at: number; }
@@ -113,6 +128,7 @@ declare global {
       getExternalLogged?(day: string): Promise<{ day: string; exported: boolean }>;
       setExternalLogged?(day: string, exported: boolean): Promise<{ day: string; exported: boolean }>;
       importExternal?(raw: string): Promise<{ ok: boolean; imported?: number; skipped?: number; details?: { line: number; reason: string }[]; error?: string }>;
+      getFlexBalance?(): Promise<FlexBalance>;
       getAuthStatus?(): Promise<AuthStatus>;
       signInMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
       signOutMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
@@ -152,6 +168,7 @@ export class IpcService {
   windowMode = signal<WindowMode>('compact');
   islandPulse = signal<IslandPulse | null>(null);
   snapHint = signal(false);
+  flexBalance = signal<FlexBalance>({ enabled: false });
   private latestLoadDayRequest = 0;
 
   constructor() {
@@ -243,7 +260,17 @@ export class IpcService {
         console.error('[ipc] loadDay external logged failed', { day, err });
       });
     }
-    return Promise.all([entriesP, summaryP]).then(() => {});
+    return Promise.all([entriesP, summaryP]).then(() => { this.loadFlexBalance(); });
+  }
+
+  loadFlexBalance(): Promise<void> {
+    if (!window.workApi.getFlexBalance) return Promise.resolve();
+    return window.workApi.getFlexBalance()
+      .then((balance) => this.flexBalance.set(balance ?? { enabled: false }))
+      .catch((err) => {
+        console.error('[ipc] loadFlexBalance failed', err);
+        this.flexBalance.set({ enabled: false });
+      });
   }
 
   loadRecent() {
@@ -294,6 +321,7 @@ export class IpcService {
         if (resp && resp.settings) this.settings.set(resp.settings);
         else this.loadSettings();
         this.loadPending();
+        this.loadFlexBalance();
         return resp;
       })
       .catch((err) => {
