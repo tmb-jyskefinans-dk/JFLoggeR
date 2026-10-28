@@ -4,6 +4,7 @@ import { IpcService, JiraIssueSuggestion } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
 import { preserveCategoryDescriptions } from '../shared/category-description.util';
 import { findPrefillEntry } from './log-dialog-prefill.util';
+import { effectiveSlotMinutes } from '../../models/work-schedule';
 
 @Component({
   selector: 'log-dialog',
@@ -264,7 +265,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
       this.manualError.set('Vælg et gyldigt Jira issue fra forslag for denne kategori.');
       return;
     }
-    const slotMinutes = this.ipc.settings()?.slot_minutes ?? 15;
+    const slotMinutes = effectiveSlotMinutes(this.ipc.settings());
     const slots: string[] = [];
     for (let m = Math.floor(startMin / slotMinutes) * slotMinutes; m < endMin; m += slotMinutes) {
       const h = Math.floor(m / 60), mm = m % 60;
@@ -432,7 +433,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   private prefillFromAdjacentPreviousSlot(slotKey: string) {
     if (!this.prefillPrevious()) return;
     const [day] = slotKey.split('T');
-    const slotMinutes = this.ipc.settings()?.slot_minutes ?? 15;
+    const slotMinutes = effectiveSlotMinutes(this.ipc.settings());
 
     void window.workApi.getDayEntries(day).then((entries: Array<{ day: string; start: string; description: string; category: string }>) => {
       if (this.description().trim() || this.category().trim() || this.andetDescription().trim()) return;

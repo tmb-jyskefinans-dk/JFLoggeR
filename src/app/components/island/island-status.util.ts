@@ -1,3 +1,13 @@
+import {
+  effectiveSlotMinutes,
+  normalizeWorkSchedule,
+  scheduledMinutesForWeekday,
+  slotStartMinutesForWeekday,
+  usesWeeklySchedule,
+  WORK_SLOT_MINUTES,
+  type WorkScheduleSettingsLike
+} from '../../models/work-schedule';
+
 export interface IslandEntryLike {
   start: string;
   end: string;
@@ -52,6 +62,26 @@ export function workdayMinutes(workStart: string, workEnd: string): number {
   return Number.isFinite(start) && Number.isFinite(end) && end > start ? end - start : 0;
 }
 
+function weeklySlotStarts(now: Date, settings: WorkScheduleSettingsLike): number[] {
+  return slotStartMinutesForWeekday(settings, now.getDay()) ?? [];
+}
+
+export function isInWorkTime(now: Date, settings: WorkScheduleSettingsLike): boolean {
+  if (!usesWeeklySchedule(settings)) {
+    return isWithinWorkHours(now, settings.work_start ?? '08:00', settings.work_end ?? '16:00');
+  }
+  const mins = now.getHours() * 60 + now.getMinutes();
+  const block = minutesToHm(Math.floor(mins / WORK_SLOT_MINUTES) * WORK_SLOT_MINUTES);
+  return normalizeWorkSchedule(settings.work_schedule)[now.getDay()]?.includes(block) ?? false;
+}
+
+export function plannedWorkMinutes(now: Date, settings: WorkScheduleSettingsLike): number {
+  if (!usesWeeklySchedule(settings)) {
+    return workdayMinutes(settings.work_start ?? '08:00', settings.work_end ?? '16:00');
+  }
+  return scheduledMinutesForWeekday(settings, now.getDay());
+}
+
 export function loggedMinutes(entries: readonly IslandEntryLike[]): number {
   return entries.reduce((sum, e) => {
     const s = hmToMinutes(e.start);
@@ -98,8 +128,16 @@ export interface NextLogSlot {
 /** Next moment a slot ends and is queued for logging today, or null when the workday is over/disabled. */
 export function nextLogSlot(
   now: Date,
-  settings: { slot_minutes?: number; work_start?: string; work_end?: string; weekdays_mask?: number }
+  settings: WorkScheduleSettingsLike
 ): NextLogSlot | null {
+  if (usesWeeklySchedule(settings)) {
+    const nowExactWeekly = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+    const target = weeklySlotStarts(now, settings)
+      .map(start => start + effectiveSlotMinutes(settings))
+      .find(end => end > nowExactWeekly);
+    if (target === undefined) return null;
+    return { time: minutesToHm(target), minutesUntil: Math.max(1, Math.ceil(target - nowExactWeekly)) };
+  }
   const mask = Number(settings.weekdays_mask);
   if (Number.isFinite(mask) && (mask & (1 << now.getDay())) === 0) return null;
   const start = hmToMinutes(settings.work_start ?? '08:00');

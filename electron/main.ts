@@ -142,8 +142,10 @@ import {
   daySlots,
   toLocalDateYMD,
   getSlotMinutes,
-  parseHM
+  parseHM,
+  shouldPromptForFinishedSlot
 } from './time';
+import { usesWeeklySchedule } from './work-schedule';
 import { JiraApiIssue, mapAndRankJiraIssues } from './jira-search';
 
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
@@ -512,7 +514,10 @@ function notifyForSlot(slot: Date) {
   const hh = `${slot.getHours()}`.padStart(2, '0');
   const mm = `${slot.getMinutes()}`.padStart(2, '0');
   const slotLen = getSlotMinutes();
-  const body = `Log ${day} ${hh}:${mm}–${hh}:${(Number(mm) + slotLen).toString().padStart(2, '0')}`;
+  const slotEnd = new Date(slot.getTime() + slotLen * 60000);
+  const endHh = `${slotEnd.getHours()}`.padStart(2, '0');
+  const endMm = `${slotEnd.getMinutes()}`.padStart(2, '0');
+  const body = `Log ${day} ${hh}:${mm}–${endHh}:${endMm}`;
 
   const st = getSettings();
   if (islandVisible()) {
@@ -551,30 +556,23 @@ function scheduleTicker() {
   if (tickerHandle) { try { clearTimeout(tickerHandle); } catch { } tickerHandle = null; }
   const tick = () => {
     const boundary = new Date(); // This is the start of the NEW slot
-    if (isWorkTime(boundary)) {
+    const prevStart = previousSlotStart(boundary); // Slot that just finished
+    if (shouldPromptForFinishedSlot(boundary, prevStart)) {
       const gran = getSlotMinutes();
-      const prevStart = previousSlotStart(boundary); // Slot that just finished
       try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, prevStart: slotKey(prevStart) }); } catch { }
       const sDyn = getSettings();
-      const { h: dsh, m: dsm } = parseHM(sDyn.work_start);
-      const { h: deh, m: dem } = parseHM(sDyn.work_end);
-      const dayStart = new Date(boundary); dayStart.setHours(dsh, dsm, 0, 0);
-      const dayEnd = new Date(boundary); dayEnd.setHours(deh, dem, 0, 0);
-      // Prompt for the slot that FINISHED (prevStart) if it lies fully within work hours.
-      if (prevStart >= dayStart && prevStart < dayEnd) {
-        const key = slotKey(prevStart);
-        // Guard against re-queueing already logged slot
-        const day = toLocalDateYMD(prevStart);
-        const alreadyLogged = isSlotCoveredByEntries(prevStart, getDayEntries(day) as Array<{ start: string; end: string }>);
-        if (!alreadyLogged) {
-          enqueuePending(key); // emits queue:updated
-          try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch { }
-          notifyForSlot(prevStart);
-          if (sDyn.auto_focus_on_slot && win) {
-            bringWindowToFront();
-            console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
-            win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
-          }
+      const key = slotKey(prevStart);
+      // Guard against re-queueing already logged slot
+      const day = toLocalDateYMD(prevStart);
+      const alreadyLogged = isSlotCoveredByEntries(prevStart, getDayEntries(day) as Array<{ start: string; end: string }>);
+      if (!alreadyLogged) {
+        enqueuePending(key); // emits queue:updated
+        try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch { }
+        notifyForSlot(prevStart);
+        if (sDyn.auto_focus_on_slot && win) {
+          bringWindowToFront();
+          console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
+          win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
         }
       }
     }
@@ -1086,7 +1084,8 @@ ipcMain.handle('db:delete-entry', (_e, day: string, start: string) => {
       const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
       const now = new Date();
       const isToday = day === toLocalDateYMD(now);
-      const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isWorkdayEnabled(slotDate);
+      const isScheduled = usesWeeklySchedule(getSettings()) ? isWorkTime(slotDate) : isWorkdayEnabled(slotDate);
+      const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isScheduled;
       if (shouldRequeue) enqueuePending(`${day}T${start}`); // emits queue:updated
     } catch { /* ignore parse errors */ }
     return { ok: true, removed };

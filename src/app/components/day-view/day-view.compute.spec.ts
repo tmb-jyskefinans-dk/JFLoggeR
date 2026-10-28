@@ -22,4 +22,10 @@ describe('computeMissingRows', () => {
     const missing = rows.filter(r => r.missing).map(r => r.start);
     expect(missing).toEqual(['08:00','08:15','08:30']);
   });
+  it('uses only the weekly schedule slots in weekly mode (lunch gap)', () => {
+    const schedule = Array.from({ length: 7 }, () => [] as string[]);
+    schedule[2] = ['11:45', '12:45']; // 2025-11-11 is a Tuesday
+    const rows = computeMissingRows([], { ...settings, work_schedule_mode: 'weekly', work_schedule: schedule }, day, 14 * 60);
+    expect(rows.filter(r => r.missing).map(r => r.start)).toEqual(['11:45', '12:45']);
+  });
 });

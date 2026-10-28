@@ -4,6 +4,12 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { LowSync } from 'lowdb';
 import { JSONFileSync } from 'lowdb/node';
+import {
+  normalizeWorkSchedule,
+  normalizeWorkScheduleMode,
+  type WorkSchedule,
+  type WorkScheduleMode
+} from './work-schedule';
 
 export type Entry = {
   id?: number;          // not used but kept for compatibility with older code
@@ -20,6 +26,8 @@ export type Settings = {
   work_end: string;      // "16:00"
   slot_minutes: number;  // 15
   weekdays_mask: number; // bitmask Sun..Sat (Sun=1<<0)
+  work_schedule_mode?: WorkScheduleMode; // 'interval' (legacy fields above) or 'weekly' (work_schedule)
+  work_schedule?: WorkSchedule; // selected 15-minute slot starts, indexed Sun..Sat
   include_active_slot?: boolean; // deprecated: pending queue is end-time-only
   azure_tenant_id?: string;      // Microsoft Entra tenant ID (not a secret)
   azure_client_id?: string;      // Microsoft Entra app registration client ID (not a secret)
@@ -59,6 +67,7 @@ const DEFAULT_SETTINGS: Settings = {
   work_end: '16:00',
   slot_minutes: 15,
   weekdays_mask: 0b0111110, // Mon–Fri
+  work_schedule_mode: 'interval',
   include_active_slot: false,
   azure_tenant_id: '',
   azure_client_id: '',
@@ -118,6 +127,17 @@ export function initDb() {
       db.data.settings.slot_minutes = sanitizeSlotMinutes(db.data.settings.slot_minutes);
       changed = true;
     }
+    if (db.data.settings.work_schedule_mode !== normalizeWorkScheduleMode(db.data.settings.work_schedule_mode)) {
+      db.data.settings.work_schedule_mode = normalizeWorkScheduleMode(db.data.settings.work_schedule_mode);
+      changed = true;
+    }
+    if (db.data.settings.work_schedule !== undefined) {
+      const normalized = normalizeWorkSchedule(db.data.settings.work_schedule);
+      if (JSON.stringify(normalized) !== JSON.stringify(db.data.settings.work_schedule)) {
+        db.data.settings.work_schedule = normalized;
+        changed = true;
+      }
+    }
     // ensure new fields
     if (db.data.settings.include_active_slot !== false) {
       db.data.settings.include_active_slot = false;
@@ -170,6 +190,10 @@ export function saveSettings(s: Settings) {
     work_end: s.work_end,
     slot_minutes: sanitizeSlotMinutes(s.slot_minutes),
     weekdays_mask: Number(s.weekdays_mask) >>> 0,
+    work_schedule_mode: normalizeWorkScheduleMode(s.work_schedule_mode ?? prev?.work_schedule_mode),
+    work_schedule: s.work_schedule !== undefined
+      ? normalizeWorkSchedule(s.work_schedule)
+      : prev?.work_schedule,
     include_active_slot: false,
     azure_tenant_id: String(s.azure_tenant_id ?? '').trim(),
     azure_client_id: String(s.azure_client_id ?? '').trim(),

@@ -26,11 +26,13 @@ const path = tslib_1.__importStar(require("node:path"));
 const fs = tslib_1.__importStar(require("node:fs"));
 const lowdb_1 = require("lowdb");
 const node_1 = require("lowdb/node");
+const work_schedule_1 = require("./work-schedule");
 const DEFAULT_SETTINGS = {
     work_start: '08:00',
     work_end: '16:00',
     slot_minutes: 15,
     weekdays_mask: 0b0111110, // Mon–Fri
+    work_schedule_mode: 'interval',
     include_active_slot: false,
     azure_tenant_id: '',
     azure_client_id: '',
@@ -87,6 +89,17 @@ function initDb() {
         if (sanitizeSlotMinutes(db.data.settings.slot_minutes) !== db.data.settings.slot_minutes) {
             db.data.settings.slot_minutes = sanitizeSlotMinutes(db.data.settings.slot_minutes);
             changed = true;
+        }
+        if (db.data.settings.work_schedule_mode !== (0, work_schedule_1.normalizeWorkScheduleMode)(db.data.settings.work_schedule_mode)) {
+            db.data.settings.work_schedule_mode = (0, work_schedule_1.normalizeWorkScheduleMode)(db.data.settings.work_schedule_mode);
+            changed = true;
+        }
+        if (db.data.settings.work_schedule !== undefined) {
+            const normalized = (0, work_schedule_1.normalizeWorkSchedule)(db.data.settings.work_schedule);
+            if (JSON.stringify(normalized) !== JSON.stringify(db.data.settings.work_schedule)) {
+                db.data.settings.work_schedule = normalized;
+                changed = true;
+            }
         }
         // ensure new fields
         if (db.data.settings.include_active_slot !== false) {
@@ -188,6 +201,10 @@ function saveSettings(s) {
         work_end: s.work_end,
         slot_minutes: sanitizeSlotMinutes(s.slot_minutes),
         weekdays_mask: Number(s.weekdays_mask) >>> 0,
+        work_schedule_mode: (0, work_schedule_1.normalizeWorkScheduleMode)(s.work_schedule_mode ?? prev?.work_schedule_mode),
+        work_schedule: s.work_schedule !== undefined
+            ? (0, work_schedule_1.normalizeWorkSchedule)(s.work_schedule)
+            : prev?.work_schedule,
         include_active_slot: false,
         azure_tenant_id: String(s.azure_tenant_id ?? '').trim(),
         azure_client_id: String(s.azure_client_id ?? '').trim(),

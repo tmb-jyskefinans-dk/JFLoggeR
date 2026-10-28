@@ -7,24 +7,24 @@ module.exports = {
   },
   rebuildConfig: {},
   makers: [
-    {
-      name: '@electron-forge/maker-appx',
-      config: {
-        publisher: 'CN=developmentca',
-        devCert: 'C:\\devcert.pfx',
-        certPass: 'abcd'
-      }
-    },
     // {
-    //   name: '@electron-forge/maker-squirrel',
+    //   name: '@electron-forge/maker-appx',
     //   config: {
-    //     // Explicit shortcut name so Desktop & Start Menu entries use branded name
-    //     shortcutName: 'JF LoggR',
-    //     // Setup executable name (optional branding)
-    //     setupExe: 'JF-LoggR-Setup.exe'
-    //     // If you add an .ico later, specify: setupIcon: 'assets/icon.ico'
-    //   },
+    //     publisher: 'CN=developmentca',
+    //     devCert: 'C:\\devcert.pfx',
+    //     certPass: 'abcd'
+    //   }
     // },
+    {
+      name: '@electron-forge/maker-squirrel',
+      config: {
+        // Explicit shortcut name so Desktop & Start Menu entries use branded name
+        shortcutName: 'JF LoggR',
+        // Setup executable name (optional branding)
+        setupExe: 'JF-LoggR-Setup.exe'
+        // If you add an .ico later, specify: setupIcon: 'assets/icon.ico'
+      },
+    },
   ],
   plugins: [
     {

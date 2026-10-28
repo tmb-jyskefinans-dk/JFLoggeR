@@ -105,6 +105,7 @@ const stale_1 = require("./stale");
 const db_2 = require("./db");
 const auth_1 = require("./auth");
 const time_1 = require("./time");
+const work_schedule_1 = require("./work-schedule");
 const jira_search_1 = require("./jira-search");
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
@@ -526,7 +527,10 @@ function notifyForSlot(slot) {
     const hh = `${slot.getHours()}`.padStart(2, '0');
     const mm = `${slot.getMinutes()}`.padStart(2, '0');
     const slotLen = (0, time_1.getSlotMinutes)();
-    const body = `Log ${day} ${hh}:${mm}–${hh}:${(Number(mm) + slotLen).toString().padStart(2, '0')}`;
+    const slotEnd = new Date(slot.getTime() + slotLen * 60000);
+    const endHh = `${slotEnd.getHours()}`.padStart(2, '0');
+    const endMm = `${slotEnd.getMinutes()}`.padStart(2, '0');
+    const body = `Log ${day} ${hh}:${mm}–${endHh}:${endMm}`;
     const st = (0, db_1.getSettings)();
     if (islandVisible()) {
         pulseIsland('slot', (0, time_1.slotKey)(slot));
@@ -575,38 +579,29 @@ function scheduleTicker() {
     }
     const tick = () => {
         const boundary = new Date(); // This is the start of the NEW slot
-        if ((0, time_1.isWorkTime)(boundary)) {
+        const prevStart = (0, time_1.previousSlotStart)(boundary); // Slot that just finished
+        if ((0, time_1.shouldPromptForFinishedSlot)(boundary, prevStart)) {
             const gran = (0, time_1.getSlotMinutes)();
-            const prevStart = (0, time_1.previousSlotStart)(boundary); // Slot that just finished
             try {
                 console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, prevStart: (0, time_1.slotKey)(prevStart) });
             }
             catch { }
             const sDyn = (0, db_1.getSettings)();
-            const { h: dsh, m: dsm } = (0, time_1.parseHM)(sDyn.work_start);
-            const { h: deh, m: dem } = (0, time_1.parseHM)(sDyn.work_end);
-            const dayStart = new Date(boundary);
-            dayStart.setHours(dsh, dsm, 0, 0);
-            const dayEnd = new Date(boundary);
-            dayEnd.setHours(deh, dem, 0, 0);
-            // Prompt for the slot that FINISHED (prevStart) if it lies fully within work hours.
-            if (prevStart >= dayStart && prevStart < dayEnd) {
-                const key = (0, time_1.slotKey)(prevStart);
-                // Guard against re-queueing already logged slot
-                const day = (0, time_1.toLocalDateYMD)(prevStart);
-                const alreadyLogged = isSlotCoveredByEntries(prevStart, (0, db_1.getDayEntries)(day));
-                if (!alreadyLogged) {
-                    enqueuePending(key); // emits queue:updated
-                    try {
-                        console.log('[main] enqueue prevStart', key, 'pending size', pending.size);
-                    }
-                    catch { }
-                    notifyForSlot(prevStart);
-                    if (sDyn.auto_focus_on_slot && win) {
-                        bringWindowToFront();
-                        console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
-                        win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
-                    }
+            const key = (0, time_1.slotKey)(prevStart);
+            // Guard against re-queueing already logged slot
+            const day = (0, time_1.toLocalDateYMD)(prevStart);
+            const alreadyLogged = isSlotCoveredByEntries(prevStart, (0, db_1.getDayEntries)(day));
+            if (!alreadyLogged) {
+                enqueuePending(key); // emits queue:updated
+                try {
+                    console.log('[main] enqueue prevStart', key, 'pending size', pending.size);
+                }
+                catch { }
+                notifyForSlot(prevStart);
+                if (sDyn.auto_focus_on_slot && win) {
+                    bringWindowToFront();
+                    console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
+                    win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
                 }
             }
         }
@@ -1123,7 +1118,8 @@ electron_1.ipcMain.handle('db:delete-entry', (_e, day, start) => {
             const slotDate = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
             const now = new Date();
             const isToday = day === (0, time_1.toLocalDateYMD)(now);
-            const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && (0, time_1.isWorkdayEnabled)(slotDate);
+            const isScheduled = (0, work_schedule_1.usesWeeklySchedule)((0, db_1.getSettings)()) ? (0, time_1.isWorkTime)(slotDate) : (0, time_1.isWorkdayEnabled)(slotDate);
+            const shouldRequeue = isToday && slotDate.getTime() < now.getTime() && isScheduled;
             if (shouldRequeue)
                 enqueuePending(`${day}T${start}`); // emits queue:updated
         }

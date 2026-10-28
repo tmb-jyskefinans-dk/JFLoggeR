@@ -7,6 +7,12 @@ import { IpcService } from '../../services/ipc.service';
 import { ClockService } from '../../services/clock.service';
 import { getJiraAfstemRows, shouldJiraAutoLogOnAfstem } from '../shared/jira-afstem.util';
 import { SnackbarService } from '../../services/snackbar.service';
+import {
+  effectiveSlotMinutes,
+  slotStartMinutesForWeekday,
+  weekdayFromYmd,
+  type WorkScheduleSettingsLike
+} from '../../models/work-schedule';
 
 @Component({
   selector: 'day-view',
@@ -137,16 +143,11 @@ export class DayViewComponent implements OnDestroy {
     const s = this.settings();
     const day = this.day();
     if (!day || !s) return list;
-    const slotMinutes: number = Number(s.slot_minutes) || 15;
-    const workStart: string = s.work_start;
-    const workEnd: string = s.work_end;
-    if (!workStart || !workEnd) return list;
-    // Parse work window
-    const [wsh, wsm] = workStart.split(':').map(Number);
-    const [weh, wem] = workEnd.split(':').map(Number);
-    const startM = wsh * 60 + wsm;
-    const endM = weh * 60 + wem;
-    if (endM <= startM) return list;
+    const slotMinutes = effectiveSlotMinutes(s);
+    const weekday = weekdayFromYmd(day);
+    if (weekday === null) return list;
+    const slotStarts = slotStartMinutesForWeekday(s, weekday);
+    if (!slotStarts) return list;
     // Build coverage set of slot start minutes covered by existing entries.
     // Entry coverage: any slot whose start minute >= entry.start and < entry.end considered covered.
     const covered = new Set<number>();
@@ -168,7 +169,7 @@ export class DayViewComponent implements OnDestroy {
     }
     const placeholders: any[] = [];
     const placeholderStarts = new Set<string>();
-    for (let m = startM; m < endM; m += slotMinutes) {
+    for (const m of slotStarts) {
       if (m >= nowLimitM) break; // don't show future intervals for current day
       if (!covered.has(m)) {
         const h = Math.floor(m / 60), mm = m % 60;
@@ -613,13 +614,13 @@ export class DayViewComponent implements OnDestroy {
 }
 
 // Pure helper used for tests (reuses logic above without signals)
-export function computeMissingRows(entries: { start:string; end:string; description?:string; category?:string }[], settings: { work_start:string; work_end:string; slot_minutes:number }, day: string, nowMinutesSinceMidnight: number): any[] {
+export function computeMissingRows(entries: { start:string; end:string; description?:string; category?:string }[], settings: WorkScheduleSettingsLike, day: string, nowMinutesSinceMidnight: number): any[] {
   if (!day || !settings) return entries;
-  const slotMinutes = Number(settings.slot_minutes) || 15;
-  const [wsh,wsm] = settings.work_start.split(':').map(Number);
-  const [weh,wem] = settings.work_end.split(':').map(Number);
-  const startM = wsh*60+wsm, endM = weh*60+wem;
-  if (endM <= startM) return entries;
+  const slotMinutes = effectiveSlotMinutes(settings);
+  const weekday = weekdayFromYmd(day);
+  if (weekday === null) return entries;
+  const slotStarts = slotStartMinutesForWeekday(settings, weekday);
+  if (!slotStarts) return entries;
   const covered = new Set<number>();
   for (const e of entries) {
     if (!e.start || !e.end) continue;
@@ -630,7 +631,7 @@ export function computeMissingRows(entries: { start:string; end:string; descript
     for (let m = es; m < ee; m += slotMinutes) if (m % slotMinutes === 0) covered.add(m);
   }
   const placeholders: any[] = [];
-  for (let m = startM; m < endM; m += slotMinutes) {
+  for (const m of slotStarts) {
     if (m >= nowMinutesSinceMidnight) break;
     if (!covered.has(m)) {
       const h = Math.floor(m/60), mm = m%60;

@@ -1,5 +1,10 @@
 // electron/time.ts
 import { getSettings } from './db';
+import {
+  isScheduledSlot,
+  normalizeWorkSchedule,
+  usesWeeklySchedule
+} from './work-schedule';
 
 export function toLocalDateYMD(d = new Date()) {
   const y = d.getFullYear();
@@ -22,19 +27,33 @@ export function getSlotMinutes() {
 
 /** Workday helpers */
 export function isWorkdayEnabled(d = new Date()) {
-  const { weekdays_mask } = getSettings();
+  const s = getSettings();
+  if (usesWeeklySchedule(s)) return (normalizeWorkSchedule(s.work_schedule)[d.getDay()]?.length ?? 0) > 0;
   const bit = 1 << d.getDay(); // Sun=0..Sat=6
-  return (weekdays_mask & bit) !== 0;
+  return (s.weekdays_mask & bit) !== 0;
 }
 
 export function isWorkTime(now = new Date()) {
   const s = getSettings();
+  if (usesWeeklySchedule(s)) return isScheduledSlot(normalizeWorkSchedule(s.work_schedule), now);
   const { h: sh, m: sm } = parseHM(s.work_start);
   const { h: eh, m: em } = parseHM(s.work_end);
   const mins = now.getHours() * 60 + now.getMinutes();
   const start = sh * 60 + sm;
   const end = eh * 60 + em;
   return isWorkdayEnabled(now) && mins >= start && mins < end;
+}
+
+/** Whether the slot that just finished (prevStart) at the given boundary should be queued and notified. */
+export function shouldPromptForFinishedSlot(boundary: Date, prevStart: Date) {
+  const s = getSettings();
+  if (usesWeeklySchedule(s)) return isScheduledSlot(normalizeWorkSchedule(s.work_schedule), prevStart);
+  if (!isWorkTime(boundary)) return false;
+  const { h: dsh, m: dsm } = parseHM(s.work_start);
+  const { h: deh, m: dem } = parseHM(s.work_end);
+  const dayStart = new Date(boundary); dayStart.setHours(dsh, dsm, 0, 0);
+  const dayEnd = new Date(boundary); dayEnd.setHours(deh, dem, 0, 0);
+  return prevStart >= dayStart && prevStart < dayEnd;
 }
 
 /** Slot math */
@@ -65,6 +84,17 @@ export function previousSlotStart(now = new Date()) {
 export function daySlots(date = new Date()) {
   const s = getSettings();
   const gran = getSlotMinutes();
+  if (usesWeeklySchedule(s)) {
+    // Slots of the configured length whose start falls inside a selected schedule block.
+    const schedule = normalizeWorkSchedule(s.work_schedule);
+    const slots: Date[] = [];
+    for (let m = 0; m < 24 * 60; m += gran) {
+      const slot = new Date(date);
+      slot.setHours(Math.floor(m / 60), m % 60, 0, 0);
+      if (isScheduledSlot(schedule, slot)) slots.push(slot);
+    }
+    return slots;
+  }
   if (gran <= 0) return [];
   // Respect configured working days; return empty when disabled for this date.
   if (!isWorkdayEnabled(date)) return [];

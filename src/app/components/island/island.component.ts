@@ -8,14 +8,15 @@ import {
   IslandEntryLike,
   currentSlotRange,
   formatDuration,
-  isWithinWorkHours,
+  isInWorkTime,
   lastLoggedEntry,
   loggedMinutes,
   newestPendingSlot,
   nextLogSlot,
-  progressRatio,
-  workdayMinutes
+  plannedWorkMinutes,
+  progressRatio
 } from './island-status.util';
+import { effectiveSlotMinutes } from '../../models/work-schedule';
 
 const RING_RADIUS = 15.5;
 const PANEL_WINDOW_PADDING = 2;
@@ -44,12 +45,11 @@ export class IslandComponent implements OnDestroy {
   private settings = computed(() => this.ipc.settings() ?? {});
   slot = computed(() => {
     this.clock.currentTime();
-    return currentSlotRange(new Date(), Number(this.settings().slot_minutes) || 15);
+    return currentSlotRange(new Date(), effectiveSlotMinutes(this.settings()));
   });
   inWorkHours = computed(() => {
     this.clock.currentTime();
-    const s = this.settings();
-    return isWithinWorkHours(new Date(), s.work_start ?? '08:00', s.work_end ?? '16:00');
+    return isInWorkTime(new Date(), this.settings());
   });
   private todayEntries = computed<IslandEntryLike[]>(() => {
     const today = this.clock.today();
@@ -57,8 +57,8 @@ export class IslandComponent implements OnDestroy {
   });
   loggedLabel = computed(() => formatDuration(loggedMinutes(this.todayEntries())));
   progress = computed(() => {
-    const s = this.settings();
-    return progressRatio(loggedMinutes(this.todayEntries()), workdayMinutes(s.work_start ?? '08:00', s.work_end ?? '16:00'));
+    this.clock.today();
+    return progressRatio(loggedMinutes(this.todayEntries()), plannedWorkMinutes(new Date(), this.settings()));
   });
   progressPct = computed(() => Math.round(this.progress() * 100));
   ringOffset = computed(() => this.ringCircumference * (1 - this.progress()));

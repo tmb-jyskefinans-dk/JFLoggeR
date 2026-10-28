@@ -4,13 +4,26 @@ import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
 import { IpcService } from '../../services/ipc.service';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import {
+  ALL_WORK_SLOT_STARTS,
+  effectiveSlotMinutes,
+  emptyWorkSchedule,
+  normalizeWorkSchedule,
+  scheduleFromInterval,
+  schedulesEqual,
+  WORK_SLOT_MINUTES,
+  type WorkSchedule,
+  type WorkScheduleMode
+} from '../../models/work-schedule';
 
 @Component({
   selector: 'settings-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [ReactiveFormsModule, DecimalPipe],
   host: {
-    '(window:beforeunload)': 'onWindowBeforeUnload($event)'
+    '(window:beforeunload)': 'onWindowBeforeUnload($event)',
+    '(window:pointerup)': 'endScheduleDrag()',
+    '(window:pointercancel)': 'endScheduleDrag()'
   },
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss']
@@ -31,6 +44,7 @@ export class SettingsComponent {
   ] as const;
 
   settingsForm = this.fb.nonNullable.group({
+    work_schedule_mode: 'interval' as WorkScheduleMode,
     work_start: '08:00',
     work_end: '16:00',
     slot_minutes: 15,
@@ -58,6 +72,17 @@ export class SettingsComponent {
   private settingsValue = toSignal(this.settingsForm.valueChanges, {
     initialValue: this.settingsForm.getRawValue()
   });
+  readonly workSlots = ALL_WORK_SLOT_STARTS;
+  readonly workSlotMinutes = WORK_SLOT_MINUTES;
+  readonly hourHeaders = ALL_WORK_SLOT_STARTS.filter((_, index) => index % 4 === 0);
+  workSchedule = signal<WorkSchedule>(emptyWorkSchedule());
+  private dragActive = false;
+  private dragTargetState = false;
+  private dragVisited = new Set<string>();
+
+  isWeeklyMode = computed(() => this.settingsValue().work_schedule_mode === 'weekly');
+  scheduleSets = computed(() => this.workSchedule().map(slots => new Set(slots)));
+  importSlotMinutes = computed(() => effectiveSlotMinutes(this.ipc.settings()));
 
   authBusy = signal<boolean>(false);
   authError = signal<string>('');
@@ -93,6 +118,9 @@ export class SettingsComponent {
   // Derived signals
   totalWorkMinutes = computed(() => {
     const v = this.settingsValue();
+    if (v.work_schedule_mode === 'weekly') {
+      return this.workSchedule().reduce((total, slots) => total + slots.length * WORK_SLOT_MINUTES, 0);
+    }
     const startParts = (v.work_start || '').split(':').map(Number);
     const endParts = (v.work_end || '').split(':').map(Number);
     if (startParts.length < 2 || endParts.length < 2) return 0;
@@ -112,6 +140,8 @@ export class SettingsComponent {
         s.work_end !== v.work_end ||
         Number(s.slot_minutes) !== Number(v.slot_minutes) ||
            maskOrig !== maskNow ||
+        (s.work_schedule_mode === 'weekly' ? 'weekly' : 'interval') !== v.work_schedule_mode ||
+        (v.work_schedule_mode === 'weekly' && !schedulesEqual(normalizeWorkSchedule(s.work_schedule), this.workSchedule())) ||
         ((s.azure_tenant_id ?? '') !== (v.azure_tenant_id ?? '')) ||
         ((s.azure_client_id ?? '') !== (v.azure_client_id ?? '')) ||
         ((s.jira_psa_key ?? '') !== (v.jira_psa_key ?? '')) ||
@@ -130,10 +160,13 @@ export class SettingsComponent {
     const s = this.ipc.settings();
   if (s) { this.apply(s); this.initialSettings.set(s); } else this.ipc.loadSettings();
     this.ipc.loadAuthStatus();
-    // Reactively apply settings when signal updates
+    // Apply the asynchronous initial load once. Later emissions must not overwrite local edits.
     effect(() => {
       const v = this.ipc.settings();
-      if (v) { this.apply(v); if (!this.initialSettings()) this.initialSettings.set(v); }
+      if (v && !this.initialSettings()) {
+        this.apply(v);
+        this.initialSettings.set(v);
+      }
 
       // Show linked Jira account automatically when Jira settings already exist.
       if (v && !this.autoJiraVerifyAttempted) {
@@ -148,7 +181,9 @@ export class SettingsComponent {
   }
 
   apply(s: any) {
+    this.workSchedule.set(normalizeWorkSchedule(s.work_schedule));
     this.settingsForm.patchValue({
+      work_schedule_mode: s.work_schedule_mode === 'weekly' ? 'weekly' : 'interval',
       work_start: s.work_start,
       work_end: s.work_end,
       slot_minutes: Number(s.slot_minutes) || 15,
@@ -182,6 +217,8 @@ export class SettingsComponent {
       work_end: raw.work_end,
       slot_minutes: Number(raw.slot_minutes),
       weekdays_mask,
+      work_schedule_mode: raw.work_schedule_mode,
+      work_schedule: this.workSchedule(),
       azure_tenant_id: raw.azure_tenant_id.trim(),
       azure_client_id: raw.azure_client_id.trim(),
       jira_psa_key: raw.jira_psa_key.trim(),
@@ -196,9 +233,11 @@ export class SettingsComponent {
       jira_log_on_afstem: raw.jira_log_on_afstem
     };
     try {
-      await this.ipc.saveSettings(payload);
+      const resp = await this.ipc.saveSettings(payload);
       // Update baseline after successful save for accurate change detection.
-      this.initialSettings.set(payload);
+      const persisted = resp?.settings ?? payload;
+      this.apply(persisted);
+      this.initialSettings.set(persisted);
       if (payload.jira_psa_key && payload.jira_project_key) {
         await this.verifyJiraIdentity(payload.jira_psa_key);
       } else {
@@ -232,6 +271,82 @@ export class SettingsComponent {
     if (!key) return;
     const ctrl = this.settingsForm.controls[key];
     ctrl.setValue(!ctrl.value);
+  }
+
+  setWorkScheduleMode(mode: WorkScheduleMode) {
+    if (mode === 'weekly' && this.workSchedule().every(slots => !slots.length)) {
+      const raw = this.settingsForm.getRawValue();
+      const mask = this.weekdayControlNames.reduce((acc, name, i) => raw[name] ? acc | (1 << i) : acc, 0);
+      this.workSchedule.set(scheduleFromInterval(raw.work_start, raw.work_end, mask));
+    }
+    this.settingsForm.controls.work_schedule_mode.setValue(mode);
+  }
+
+  isSlotSelected(weekday: number, slot: string): boolean {
+    return this.scheduleSets()[weekday]?.has(slot) ?? false;
+  }
+
+  dayWorkMinutes(weekday: number): number {
+    return (this.workSchedule()[weekday]?.length ?? 0) * WORK_SLOT_MINUTES;
+  }
+
+  onScheduleSlotClick(event: MouseEvent, weekday: number, slot: string) {
+    // Pointer clicks are handled by pointerdown; only keyboard activation (detail 0) toggles here.
+    if (event.detail !== 0) return;
+    this.setScheduleSlot(weekday, slot, !this.isSlotSelected(weekday, slot));
+  }
+
+  startScheduleDrag(event: PointerEvent, weekday: number, slot: string) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    this.dragActive = true;
+    this.dragTargetState = !this.isSlotSelected(weekday, slot);
+    this.dragVisited.clear();
+    this.paintScheduleSlot(weekday, slot);
+    const target = event.currentTarget;
+    // Release implicit pointer capture so pointerenter fires on neighbouring slots while dragging.
+    queueMicrotask(() => {
+      if (target instanceof Element && target.hasPointerCapture(event.pointerId)) {
+        target.releasePointerCapture(event.pointerId);
+      }
+    });
+  }
+
+  continueScheduleDrag(weekday: number, slot: string) {
+    if (this.dragActive) this.paintScheduleSlot(weekday, slot);
+  }
+
+  endScheduleDrag() {
+    this.dragActive = false;
+    this.dragVisited.clear();
+  }
+
+  selectEntireDay(weekday: number) {
+    this.updateScheduleDay(weekday, ALL_WORK_SLOT_STARTS);
+  }
+
+  clearDay(weekday: number) {
+    this.updateScheduleDay(weekday, []);
+  }
+
+  private paintScheduleSlot(weekday: number, slot: string) {
+    const key = `${weekday}:${slot}`;
+    if (this.dragVisited.has(key)) return;
+    this.dragVisited.add(key);
+    this.setScheduleSlot(weekday, slot, this.dragTargetState);
+  }
+
+  private setScheduleSlot(weekday: number, slot: string, active: boolean) {
+    const current = new Set(this.workSchedule()[weekday] ?? []);
+    if (active) current.add(slot);
+    else current.delete(slot);
+    this.updateScheduleDay(weekday, Array.from(current).sort());
+  }
+
+  private updateScheduleDay(weekday: number, slots: string[]) {
+    this.workSchedule.update(schedule =>
+      schedule.map((daySlots, index) => index === weekday ? [...slots] : daySlots)
+    );
   }
 
   async signInMicrosoft() {
