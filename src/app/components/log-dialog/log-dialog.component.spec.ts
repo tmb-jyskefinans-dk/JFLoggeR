@@ -80,6 +80,20 @@ describe('LogDialogComponent', () => {
     expect(document.activeElement).toBe(descInput);
   }));
 
+  it('defaults manual start to the current slot boundary', () => {
+    jasmine.clock().install();
+    try {
+      jasmine.clock().mockDate(new Date(2026, 10, 17, 7, 5));
+      fixture.componentRef.setInput('manualMode', true);
+      fixture.detectChanges();
+
+      expect(component.manualStart()).toBe('07:00');
+      expect(component.manualEnd()).toBe('08:00');
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
   it('focuses submit button on interval prompt open', fakeAsync(() => {
     pendingSlots.set(['2026-05-19T12:00']);
     component.category.set('Projekt');

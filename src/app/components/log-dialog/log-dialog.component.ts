@@ -4,7 +4,7 @@ import { IpcService, JiraIssueSuggestion } from '../../services/ipc.service';
 import { FormsModule } from '@angular/forms';
 import { preserveCategoryDescriptions } from '../shared/category-description.util';
 import { findPrefillEntry } from './log-dialog-prefill.util';
-import { effectiveSlotMinutes } from '../../models/work-schedule';
+import { effectiveSlotMinutes, minuteToTime } from '../../models/work-schedule';
 
 @Component({
   selector: 'log-dialog',
@@ -112,6 +112,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.manualMode()) {
       const d = this.manualInitialDate();
       if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) this.manualDate.set(d);
+      this.initManualTimesFromNow();
       this.ipc.loadRecent();
       return;
     }
@@ -246,6 +247,16 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     this.andetDescription.set('');
     this.selectedSlots.set([]);
     this.closed.emit();
+  }
+
+  /** Defaults the manual interval to start at the current slot boundary (e.g. 07:05 -> 07:00) and last one hour. */
+  private initManualTimesFromNow(now = new Date()) {
+    const slotMinutes = effectiveSlotMinutes(this.ipc.settings());
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const startMin = Math.floor(nowMin / slotMinutes) * slotMinutes;
+    const endMin = Math.min(startMin + 60, 24 * 60 - 1);
+    this.manualStart.set(minuteToTime(startMin));
+    this.manualEnd.set(minuteToTime(endMin));
   }
 
   private async submitManual() {
