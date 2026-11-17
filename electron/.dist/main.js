@@ -36,24 +36,25 @@ function writeLog(level, message, meta) {
     }
     catch (e) { /* last-chance; avoid throwing in logger */ }
 }
-// Chromium's network stack verifies TLS against the Windows certificate store (where the corporate CA lives)
-// and honours the system proxy, so no certificate checks need to be disabled for on-prem Jira.
+// Chromium's network stack verifies TLS against the Windows certificate store and honours the system proxy.
 async function jiraRequest(connection, method, url, body) {
     const headers = { ...(0, jira_client_1.jiraAuthHeaders)(connection) };
     if (body !== undefined)
         headers['Content-Type'] = 'application/json';
-    const res = await electron_1.net.fetch(url, {
+    const init = {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
-        // Never follow redirects with the Authorization header or use ambient browser cookies.
-        redirect: 'error',
-        credentials: 'omit'
-    });
+        // Never follow redirects with credentials attached.
+        redirect: 'error'
+    };
+    // Authenticates with the captured session cookie, held in an isolated per-connection session.
+    const res = await (await (0, jira_browser_auth_1.jiraCookieRequestSession)(connection)).fetch(url, { ...init, credentials: 'include' });
     const bodyText = await res.text();
     return {
         status: res.status,
         ok: res.ok,
+        text: bodyText,
         json: async () => bodyText ? JSON.parse(bodyText) : {}
     };
 }
@@ -81,9 +82,15 @@ electron_1.ipcMain.handle = (channel, listener) => registerIpcHandler(channel, (
     return listener(event, ...args);
 });
 electron_1.app.on('web-contents-created', (_e, contents) => {
-    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    // The Jira login window must follow redirects through Atlassian and the user's identity provider.
+    const isJiraLogin = (0, jira_browser_auth_1.isJiraLoginContents)(contents);
+    contents.setWindowOpenHandler(({ url }) => {
+        if (isJiraLogin && (0, jira_browser_auth_1.isAllowedJiraLoginUrl)(url))
+            contents.loadURL(url).catch(() => { });
+        return { action: 'deny' };
+    });
     const blockForeignNavigation = (event, url) => {
-        if (!isAppUrl(url))
+        if (isJiraLogin ? !(0, jira_browser_auth_1.isAllowedJiraLoginUrl)(url) : !isAppUrl(url))
             event.preventDefault();
     };
     contents.on('will-navigate', blockForeignNavigation);
@@ -134,6 +141,7 @@ const island_1 = require("./island");
 const stale_1 = require("./stale");
 const db_2 = require("./db");
 const auth_1 = require("./auth");
+const jira_browser_auth_1 = require("./jira-browser-auth");
 const time_1 = require("./time");
 const coverage_1 = require("./coverage");
 const jira_search_1 = require("./jira-search");
@@ -157,26 +165,11 @@ try {
         require('update-electron-app')({
         // updateInterval: '1 hour', // uncomment to poll periodically
         });
-        // Hook into underlying electron-updater events to notify user.
+        // Updates are installed silently on next restart; events are only logged.
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { autoUpdater } = require('electron-updater');
         autoUpdater.on('checking-for-update', () => console.log('[update] checking for update...'));
-        autoUpdater.on('update-available', (info) => {
-            console.log('[update] update available', info?.version);
-            try {
-                const n = new electron_1.Notification({
-                    title: 'Ny opdatering klar',
-                    body: `Version ${info?.version} er tilgængelig.`,
-                    silent: !!(0, db_1.getSettings)().notification_silent
-                });
-                n.show();
-                // Also inform renderer in case it wants to surface a UI prompt.
-                win?.webContents.send('update:ready', { version: info?.version });
-            }
-            catch (notifyErr) {
-                console.warn('[update] update available notify failed', notifyErr);
-            }
-        });
+        autoUpdater.on('update-available', (info) => console.log('[update] update available', info?.version));
         autoUpdater.on('update-not-available', () => console.log('[update] no update available'));
         autoUpdater.on('error', (err) => console.warn('[update] error', err));
         autoUpdater.on('download-progress', (p) => {
@@ -185,28 +178,7 @@ try {
             }
             catch { }
         });
-        autoUpdater.on('update-downloaded', (info) => {
-            console.log('[update] downloaded', info?.version);
-            try {
-                const n = new electron_1.Notification({
-                    title: 'Opdatering klar',
-                    body: `Version ${info?.version} er klar. Genstart for at installere nu.`,
-                    silent: !!(0, db_1.getSettings)().notification_silent
-                });
-                n.on('click', () => {
-                    try {
-                        autoUpdater.quitAndInstall();
-                    }
-                    catch { }
-                });
-                n.show();
-                // Also inform renderer in case it wants to surface a UI prompt.
-                win?.webContents.send('update:ready', { version: info?.version });
-            }
-            catch (notifyErr) {
-                console.warn('[update] notify failed', notifyErr);
-            }
-        });
+        autoUpdater.on('update-downloaded', (info) => console.log('[update] downloaded', info?.version));
     }
     else {
         console.log('[main] skipping auto-update init (development environment)');
@@ -221,7 +193,6 @@ const pending = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 let tickerHandle = null; // current scheduled tick timeout
 let staleCheckHandle = null;
 let lastStaleNotifiedKey = null;
-let digestQueue = []; // slots accumulated while user away
 let lastEntryEndTime = null; // for stale detection heuristics
 const jiraMyselfCache = new Map();
 let windowMode = 'compact';
@@ -233,7 +204,7 @@ let snapHintActive = false;
 let dockCenterRatio = 0.5;
 let compactIdle = true;
 function jiraIdentityCacheKey(c) {
-    return [c.type, c.base_url, c.email, c.token].join('|');
+    return [c.base_url, c.token].join('|');
 }
 async function resolveJiraIdentity(connection) {
     if ((0, jira_client_1.jiraConnectionMissingConfig)(connection))
@@ -249,7 +220,7 @@ async function resolveJiraIdentity(connection) {
             return undefined;
         }
         const data = await res.json();
-        const accountId = (0, jira_client_1.jiraUserIdFromMyself)(connection, data);
+        const accountId = (0, jira_client_1.jiraUserIdFromMyself)(data);
         const displayName = String(data.displayName ?? '').trim() || undefined;
         const emailAddress = String(data.emailAddress ?? '').trim() || undefined;
         jiraMyselfCache.set(cacheKey, { accountId, displayName, emailAddress });
@@ -378,15 +349,39 @@ function applyWindowMode(mode, opts = {}) {
     }
     catch { }
 }
-/** Visible docked island takes over slot prompts from OS toasts. */
-function islandVisible() {
-    return !!win && (0, island_1.isDockedMode)(windowMode) && win.isVisible() && !win.isMinimized();
-}
 function pulseIsland(kind, slot) {
     try {
         win?.webContents.send('island:pulse', { kind, slot });
     }
     catch { }
+}
+/**
+ * The island is the only reminder channel. A visible detached window stays detached
+ * (returns true so the caller opens the log dialog there); a hidden or minimized window
+ * is re-docked and shown as the compact island.
+ */
+function surfaceReminder() {
+    if (!win)
+        return { detached: false };
+    const visible = win.isVisible() && !win.isMinimized();
+    if (windowMode === 'detached' && visible) {
+        bringWindowToFront();
+        return { detached: true };
+    }
+    if (!visible) {
+        try {
+            if (win.isMinimized())
+                win.restore();
+        }
+        catch { }
+        if (windowMode !== 'compact')
+            applyWindowMode('compact');
+        try {
+            win.showInactive();
+        }
+        catch { }
+    }
+    return { detached: false };
 }
 function bringWindowToFront() {
     if (!win)
@@ -456,12 +451,12 @@ function createWindow() {
             nodeIntegration: false,
             sandbox: true,
             webSecurity: true,
-            // Ensure timers (notifications ticker, stale checks) continue firing with accurate cadence
+            // Ensure timers (interval ticker, stale checks) continue firing with accurate cadence
             // even when window is unfocused or minimized. This prevents delayed queue updates.
             backgroundThrottling: false
         }
     });
-    // Update to new branded AppUserModelID (must match package.json build.appId for notifications & taskbar grouping)
+    // Update to new branded AppUserModelID (must match package.json build.appId for taskbar grouping)
     electron_1.app.setAppUserModelId('com.jyskefinans.jfloggr');
     const devUrl = devServerUrl();
     if (devUrl) {
@@ -524,79 +519,19 @@ function updateTrayTooltip() {
         console.error('[main] updateTrayTooltip failed', e);
     }
 }
-function showDigestNotification() {
-    if (!digestQueue.length)
+function remindForSlot(key, kind) {
+    if (!win)
         return;
-    // Capture the earliest & latest slot BEFORE we clear the queue so the notification click handler
-    // can reference a stable value. Previously we referenced digestQueue[0] inside the click handler
-    // after digestQueue was cleared, causing slotKey(undefined) -> TypeError.
-    const firstSlot = digestQueue[0];
-    const lastSlot = digestQueue[digestQueue.length - 1];
-    if (!firstSlot || !lastSlot) {
-        digestQueue = [];
+    const { detached } = surfaceReminder();
+    if (detached) {
+        // Dialog opens even if this slot was handled before; the renderer focuses its Submit button.
+        win.webContents.send('prompt:open', { slot: key, source: 'interval' });
+        win.webContents.send('dialog:open-log', { slot: key, source: 'interval' });
         return;
     }
-    const body = `${digestQueue.length} uloggede intervaller fra ${firstSlot.getHours().toString().padStart(2, '0')}:${firstSlot.getMinutes().toString().padStart(2, '0')} til ${lastSlot.getHours().toString().padStart(2, '0')}:${lastSlot.getMinutes().toString().padStart(2, '0')}`;
-    const st = (0, db_1.getSettings)();
-    const n = new electron_1.Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
-    n.on('click', () => {
-        if (win) {
-            bringWindowToFront();
-            // Open prompt for earliest slot captured at notification creation time.
-            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(firstSlot), source: 'notification' });
-            // Force open dialog even if slot was previously handled so user can re-log or review.
-            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(firstSlot), source: 'notification' });
-        }
-    });
-    n.show();
-    digestQueue = [];
-}
-function notifyForSlot(slot) {
-    const day = (0, time_1.toLocalDateYMD)(slot);
-    const hh = `${slot.getHours()}`.padStart(2, '0');
-    const mm = `${slot.getMinutes()}`.padStart(2, '0');
-    const slotLen = (0, time_1.getSlotMinutes)();
-    const slotEnd = new Date(slot.getTime() + slotLen * 60000);
-    const endHh = `${slotEnd.getHours()}`.padStart(2, '0');
-    const endMm = `${slotEnd.getMinutes()}`.padStart(2, '0');
-    const body = `Log ${day} ${hh}:${mm}–${endHh}:${endMm}`;
-    const st = (0, db_1.getSettings)();
-    if (islandVisible()) {
-        pulseIsland('slot', (0, time_1.slotKey)(slot));
-        win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot), source: 'island' });
-        if (!st.island_os_notifications)
-            return;
-    }
-    const n = new electron_1.Notification({ title: 'Tid til at registér tid', body, silent: !!st.notification_silent });
-    n.on('click', () => {
-        if (win) {
-            bringWindowToFront();
-            console.log('[main] notification click -> prompt:open', (0, time_1.slotKey)(slot));
-            win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
-            // Also force dialog open regardless of prior handled state.
-            win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
-        }
-        else {
-            console.warn('[main] notification clicked but window is null');
-        }
-    });
-    // Group notifications when user away & grouping enabled
-    try {
-        const away = !win?.isFocused() || electron_1.powerMonitor.getSystemIdleTime() > ((0, time_1.getSlotMinutes)() * 60);
-        if (away && st.group_notifications) {
-            digestQueue.push(slot);
-            // If many accumulated, send digest now
-            if (digestQueue.length >= 4) {
-                showDigestNotification();
-            }
-        }
-        else {
-            n.show();
-        }
-    }
-    catch {
-        n.show();
-    }
+    pulseIsland(kind, key);
+    if (kind === 'slot')
+        win.webContents.send('prompt:open', { slot: key, source: 'island' });
 }
 function scheduleTicker() {
     if (tickerHandle) {
@@ -615,7 +550,6 @@ function scheduleTicker() {
                 console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, prevStart: (0, time_1.slotKey)(prevStart) });
             }
             catch { }
-            const sDyn = (0, db_1.getSettings)();
             const key = (0, time_1.slotKey)(prevStart);
             // Guard against re-queueing already logged slot
             const day = (0, time_1.toLocalDateYMD)(prevStart);
@@ -626,12 +560,7 @@ function scheduleTicker() {
                     console.log('[main] enqueue prevStart', key, 'pending size', pending.size);
                 }
                 catch { }
-                notifyForSlot(prevStart);
-                if (sDyn.auto_focus_on_slot && win) {
-                    bringWindowToFront();
-                    console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
-                    win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
-                }
+                remindForSlot(key, 'slot');
             }
         }
         tickerHandle = setTimeout(tick, (0, time_1.nextQuarter)(new Date()).getTime() - Date.now());
@@ -652,26 +581,10 @@ function scheduleStaleCheck() {
     }
     staleCheckHandle = setInterval(() => {
         try {
-            const st = (0, db_1.getSettings)();
-            const result = (0, stale_1.computeStaleSlot)(Array.from(pending), new Date(), st, (0, time_1.getSlotMinutes)());
+            const result = (0, stale_1.computeStaleSlot)(Array.from(pending), new Date(), (0, db_1.getSettings)(), (0, time_1.getSlotMinutes)());
             if (result && result.key !== lastStaleNotifiedKey) {
                 lastStaleNotifiedKey = result.key;
-                const hm = result.key.split('T')[1];
-                const body = `Interval fra ${hm} er nu over ${Math.round(result.ageMinutes)} min uden registrering. Log tiden for at undgå at glemme den.`;
-                if (islandVisible()) {
-                    pulseIsland('stale', result.key);
-                    if (!st.island_os_notifications)
-                        return;
-                }
-                const n = new electron_1.Notification({ title: 'Overvokset interval', body, silent: !!st.notification_silent });
-                n.on('click', () => {
-                    if (win) {
-                        bringWindowToFront();
-                        win?.webContents.send('prompt:open', { slot: result.key, source: 'notification' });
-                        win?.webContents.send('dialog:open-log', { slot: result.key, source: 'notification' });
-                    }
-                });
-                n.show();
+                remindForSlot(result.key, 'stale');
             }
         }
         catch { /* ignore */ }
@@ -823,7 +736,7 @@ electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
     const after = (0, db_1.getSettings)();
     // Recalculate backlog for already elapsed slots only; future slots will be added by the ticker.
     rebuildPendingAfterSettingsChange({ includeFuture: false });
-    // If today was previously disabled and is now enabled, restart ticker + optional catch-up notification
+    // If today was previously disabled and is now enabled, restart ticker
     const now = new Date();
     const wasEnabled = (before.weekdays_mask & (1 << now.getDay())) !== 0;
     const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
@@ -870,7 +783,8 @@ electron_1.ipcMain.handle('jira:search-issues', async (_e, payload) => {
         const url = (0, jira_client_1.buildJiraSearchUrl)(connection, jql, ['key', 'summary', 'issuetype', 'assignee', 'reporter', 'customfield_10060'], 10);
         const res = await jiraRequest(connection, 'GET', url);
         if (!res.ok) {
-            return { ok: false, error: `Jira opslag fejlede (${res.status}).` };
+            const expired = res.status === 401;
+            return { ok: false, error: expired ? 'Jira browser-session er udløbet. Log ind igen via browser under Indstillinger.' : `Jira opslag fejlede (${res.status}).` };
         }
         const data = await res.json();
         const currentAccountId = (await resolveJiraIdentity(connection))?.accountId;
@@ -895,7 +809,7 @@ electron_1.ipcMain.handle('jira:verify-identity', async (_e, payload) => {
         }
         const identity = await resolveJiraIdentity(connection);
         if (!identity?.accountId) {
-            return { ok: false, error: `Login kunne ikke verificeres mod Jira /myself (${connection.name}).` };
+            return { ok: false, error: `Login kunne ikke verificeres mod Jira /myself (${connection.name}). Sessionen kan være udløbet - log ind igen via browser.` };
         }
         return {
             ok: true,
@@ -907,6 +821,18 @@ electron_1.ipcMain.handle('jira:verify-identity', async (_e, payload) => {
     catch (e) {
         logIpcFailure('jira:verify-identity', e);
         return { ok: false, error: 'Jira verifikation fejlede.' };
+    }
+});
+electron_1.ipcMain.handle('jira:browser-login', async (_e, payload) => {
+    try {
+        const result = await (0, jira_browser_auth_1.loginJiraViaBrowser)(payload?.base_url, win);
+        if (result.ok)
+            writeLog('info', 'Jira browser login completed', { expiresAt: result.expiresAt });
+        return result;
+    }
+    catch (e) {
+        logIpcFailure('jira:browser-login', e);
+        return { ok: false, error: 'Jira-login fejlede.' };
     }
 });
 // Categories in 'Udvikling Projekter' group that support Jira worklog posting
@@ -963,7 +889,7 @@ electron_1.ipcMain.handle('jira:log-worklog', async (_e, payload) => {
                 const tzH = pad2(Math.floor(Math.abs(tz) / 60));
                 const tzM = pad2(Math.abs(tz) % 60);
                 const startedStr = `${day}T${pad2(hh)}:${pad2(mm)}:00.000${tzSign}${tzH}${tzM}`;
-                const res = await jiraRequest(connection, 'POST', (0, jira_client_1.buildJiraWorklogUrl)(connection, key), (0, jira_client_1.buildJiraWorklogBody)(connection, seconds, startedStr, 'Logged via JFLoggeR'));
+                const res = await jiraRequest(connection, 'POST', (0, jira_client_1.buildJiraWorklogUrl)(connection, key), (0, jira_client_1.buildJiraWorklogBody)(seconds, startedStr, 'Logged via JFLoggeR'));
                 if (res.ok) {
                     const body = await res.json();
                     const worklogId = String(body?.id ?? '').trim();
@@ -973,7 +899,7 @@ electron_1.ipcMain.handle('jira:log-worklog', async (_e, payload) => {
                     }
                 }
                 else {
-                    const body = await res.json().catch(() => undefined);
+                    const body = await res.json().catch(() => res.text);
                     results.push({ key, seconds, success: false, error: (0, jira_client_1.describeJiraHttpError)(res.status, body) });
                 }
             }
@@ -1028,7 +954,7 @@ electron_1.ipcMain.handle('jira:unset-afstemt', async (_e, payload) => {
                 }
                 else {
                     remaining.push(row);
-                    const body = await res.json().catch(() => undefined);
+                    const body = await res.json().catch(() => res.text);
                     results.push({ key: row.key, worklogId: row.worklogId, success: false, error: (0, jira_client_1.describeJiraHttpError)(res.status, body) });
                 }
             }
@@ -1220,30 +1146,7 @@ electron_1.ipcMain.handle('queue:submit', (_e, payload) => {
     }
     catch { }
     updateTrayTooltip();
-    // The docked island collapses itself after submit; minimizing would hide it.
-    if (payload?.minimizeWindowAfterSubmit && windowMode === 'detached') {
-        try {
-            win?.minimize();
-        }
-        catch { }
-    }
     return { ok: true, created };
-});
-// Debug notification trigger (manual test without waiting for scheduler)
-electron_1.ipcMain.handle('debug:notify', (_e, opts) => {
-    if (electron_1.app.isPackaged)
-        return { ok: false };
-    const body = String(opts?.body ?? 'Test notification').slice(0, 200);
-    const slot = new Date();
-    const st = (0, db_1.getSettings)();
-    const n = new electron_1.Notification({ title: 'Work Logger (Test)', body, silent: !!st.notification_silent });
-    n.on('click', () => {
-        bringWindowToFront();
-        win?.webContents.send('prompt:open', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
-        win?.webContents.send('dialog:open-log', { slot: (0, time_1.slotKey)(slot), source: 'notification' });
-    });
-    n.show();
-    return { ok: true };
 });
 // Window control handlers (invoked from renderer via preload contextBridge)
 electron_1.ipcMain.handle('window:minimize', () => {
@@ -1371,7 +1274,7 @@ electron_1.ipcMain.on('window:pointer-drag', (_e, payload) => {
     }
 });
 electron_1.app.whenReady().then(() => {
-    // The renderer needs no browser permissions (notifications are shown from the main process).
+    // The renderer needs no browser permissions.
     electron_1.session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     electron_1.session.defaultSession.setPermissionCheckHandler(() => false);
     console.log('[main] app is ready, initializing DB and window...');
@@ -1441,7 +1344,6 @@ electron_1.app.whenReady().then(() => {
                             win?.webContents.send('dialog:open-log-all');
                         }
                         else {
-                            // Optionally could show a notification; for now silently ignore.
                             console.log('[main] bulk log requested but no pending slots');
                         }
                     }
@@ -1503,7 +1405,7 @@ electron_1.app.whenReady().then(() => {
     electron_1.screen.on('display-removed', redockAfterDisplayChange);
     console.log('[main] rebuilding backlog for today...');
     rebuildBacklogForToday({ includeFuture: false });
-    console.log('[main] scheduling ticker for notifications...');
+    console.log('[main] scheduling interval ticker...');
     scheduleTicker();
     scheduleStaleCheck();
     console.log('[main] initialization complete.');
@@ -1514,12 +1416,6 @@ electron_1.app.whenReady().then(() => {
         console.log('[main] app activate event');
         if (electron_1.BrowserWindow.getAllWindows().length === 0)
             createWindow();
-    });
-    electron_1.app.on('browser-window-focus', () => {
-        // Flush digest queue when user returns
-        if (digestQueue.length) {
-            showDigestNotification();
-        }
     });
 });
 electron_1.app.on('window-all-closed', () => {

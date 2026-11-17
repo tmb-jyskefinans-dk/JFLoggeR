@@ -78,7 +78,7 @@
   }
 
   @if(dialogOpen()) {
-    <log-dialog [openedFromNotification]="dialogOpenedFromNotification()" (closed)="closeDialog()" />
+    <log-dialog [openedFromPrompt]="dialogOpenedFromPrompt()" (closed)="closeDialog()" />
   }
   @if(manualDialogOpen()) {
     <log-dialog [manualMode]="true" [manualInitialDate]="manualDialogDate()" (closed)="closeManualDialog()" />

@@ -134,40 +134,31 @@
       <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Jira og Afstem</h3>
-          <div class="flex gap-2">
-            <button type="button" (click)="addJiraConnection('server')"
-              class="inline-flex items-center justify-center rounded-md text-xs font-medium px-3 h-8 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">+ On-Premise</button>
-            <button type="button" (click)="addJiraConnection('cloud')"
-              class="inline-flex items-center justify-center rounded-md text-xs font-medium px-3 h-8 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">+ Cloud</button>
-          </div>
+          <button #addJiraBtn type="button" (click)="addJiraConnection()"
+            class="inline-flex items-center justify-center rounded-md text-xs font-medium px-3 h-8 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600">+ Tilføj Jira Cloud</button>
         </div>
         <p class="text-xs text-slate-500 dark:text-slate-400">Den <strong>aktive</strong> forbindelse bruges til Jira-forslag og til at logge arbejdstid. Worklogs fjernes altid fra den Jira-instans, de blev oprettet på, så slet ikke en forbindelse før afstemte dage på den er håndteret.</p>
 
         @if(!jiraConnections.length) {
-          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">Ingen Jira-forbindelser. Tilføj en On-Premise eller Cloud forbindelse.</p>
+          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">Ingen Jira-forbindelser. Tilføj en Jira Cloud-forbindelse.</p>
         }
 
         <div formArrayName="jira_connections" class="mt-3 space-y-3">
           @for(group of jiraConnections.controls; track group; let i = $index) {
             @let id = group.controls.id.value;
-            @let isCloud = group.controls.type.value === 'cloud';
             @let verify = jiraVerifyResults()[id];
             <fieldset [formGroupName]="i" class="rounded-md border p-3"
               [class]="settingsForm.controls.jira_active_connection_id.value === id ? 'border-indigo-400 dark:border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20' : 'border-slate-200 dark:border-slate-700'">
-              <legend class="sr-only">{{group.controls.name.value || 'Jira-forbindelse'}}</legend>
+              <legend class="sr-only">{{group.controls.name.value || 'Jira-forbindelse ' + (i + 1)}}</legend>
               <div class="flex flex-wrap items-center gap-3 mb-3">
                 <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
                   <input type="radio" name="jira_active_connection" [value]="id" [formControl]="settingsForm.controls.jira_active_connection_id"
                     class="h-4 w-4 border-slate-300 dark:border-slate-600 focus:ring-indigo-500" />
                   Aktiv
                 </label>
-                <span class="rounded px-2 py-0.5 text-[11px] font-semibold"
-                  [class]="isCloud ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'">
-                  {{ isCloud ? 'Cloud' : 'On-Premise' }}
-                </span>
-                <button type="button" (click)="removeJiraConnection(i)"
+                <button type="button" (click)="removeJiraConnection(i, addJiraBtn)" [id]="'jira-remove-' + id"
                   class="ml-auto text-xs font-medium text-rose-700 hover:underline dark:text-rose-300"
-                  [attr.aria-label]="'Fjern ' + (group.controls.name.value || 'Jira-forbindelse')">Fjern</button>
+                  [attr.aria-label]="'Fjern ' + (group.controls.name.value || 'Jira-forbindelse ' + (i + 1))">Fjern</button>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -176,57 +167,59 @@
                   <input type="text" formControlName="name" placeholder="fx Jira Cloud"
                     class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
                 </label>
-                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
-                  Type
-                  <select formControlName="type"
-                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400">
-                    <option value="server">On-Premise (Server / Data Center)</option>
-                    <option value="cloud">Cloud (atlassian.net)</option>
-                  </select>
-                </label>
-                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
-                  Jira URL
-                  <input type="url" formControlName="base_url" [placeholder]="isCloud ? 'https://firma.atlassian.net' : 'https://app-jira.corp.jyskebank.net/jira'"
-                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-                </label>
-                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
-                  Jira project key
-                  <input type="text" formControlName="project_key" placeholder="fx TEAMJYFWEB"
-                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-                  <span class="text-xs font-normal text-slate-500 dark:text-slate-400">Bruges i JQL-filteret for autocomplete under Udvikling Projekter.</span>
-                </label>
-                @if(isCloud) {
+                <div class="flex flex-col gap-1">
                   <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
-                    Atlassian email
-                    <input type="email" formControlName="email" placeholder="navn@firma.dk" autocomplete="off"
-                      class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+                    Jira URL
+                    <input type="url" formControlName="base_url" placeholder="https://firma.atlassian.net" autocomplete="url"
+                      [attr.aria-describedby]="'jira-url-help-' + id"
+                      class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
                   </label>
-                }
-                <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
-                  {{ isCloud ? 'API token' : 'Jira PSA key' }}
-                  <input type="password" formControlName="token" [placeholder]="isCloud ? 'Indsæt Atlassian API token' : 'Indsæt PSA key'" autocomplete="off"
-                    class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-                  <span class="text-xs font-normal text-slate-500 dark:text-slate-400">
-                    @if(isCloud) {
-                      Opret et API token på id.atlassian.com. Bruges sammen med email som <strong>Basic</strong> auth.
-                      Ved et <strong>scoped</strong> token skal URL være <span class="font-mono">https://api.atlassian.com/ex/jira/&lt;cloudId&gt;</span>.
-                    } @else {
-                      Bruges som <strong>Bearer</strong> token mod Jira API.
-                    }
+                  <span [id]="'jira-url-help-' + id" class="text-xs text-slate-500 dark:text-slate-400">Jira Cloud-sitet, fx <span class="font-mono">https://firma.atlassian.net</span>. Ændres URL, skal du logge ind igen.</span>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="flex flex-col gap-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+                    Jira project key
+                    <input type="text" formControlName="project_key" placeholder="fx TEAMJYFWEB"
+                      [attr.aria-describedby]="'jira-project-help-' + id"
+                      class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono font-normal focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
+                  </label>
+                  <span [id]="'jira-project-help-' + id" class="text-xs text-slate-500 dark:text-slate-400">Bruges i JQL-filteret for autocomplete under Udvikling Projekter.</span>
+                </div>
+                <div class="flex flex-col gap-1 text-sm md:col-span-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <!-- aria-disabled keeps focus on the button while the external login window is open. -->
+                    <button #loginBtn type="button" (click)="loginJiraViaBrowser(id, loginBtn)"
+                      [attr.aria-disabled]="jiraLoginBusyId() ? 'true' : null"
+                      [attr.aria-describedby]="'jira-browser-help-' + id + ' jira-status-' + id"
+                      class="inline-flex items-center justify-center rounded-md text-xs font-semibold px-3 h-8 bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
+                      {{ isJiraLoginBusy(id) ? 'Venter på login...' : (group.controls.token.value ? 'Log ind igen via browser' : 'Log ind via browser') }}
+                    </button>
+                    <span class="text-xs font-medium text-slate-600 dark:text-slate-300">
+                      {{ group.controls.token.value ? 'Browser-session hentet.' : 'Ikke logget ind.' }}
+                    </span>
+                    </div>
+                  <span [id]="'jira-browser-help-' + id" class="text-xs text-slate-500 dark:text-slate-400">
+                    Åbner et login-vindue til Jira Cloud (SSO). Efter login hentes session-token fra cookien og bruges som login. Gem indstillingerne bagefter.
                   </span>
-                </label>
+                </div>
               </div>
 
               <div class="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" (click)="verifyJiraConnection(id)" [disabled]="isJiraVerifyBusy(id)"
+                  [attr.aria-describedby]="'jira-status-' + id"
                   class="inline-flex items-center justify-center rounded-md text-xs font-semibold px-3 h-8 gap-2 bg-indigo-600 text-white shadow hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-40">
                   {{ isJiraVerifyBusy(id) ? 'Verificerer...' : 'Verificer forbindelse' }}
                 </button>
-                @if(verify?.ok) {
-                  <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300">Forbindelsen er verificeret.</span>
-                } @else if (verify && !verify.ok) {
-                  <span class="text-xs font-medium text-rose-700 dark:text-rose-300">{{verify.error}}</span>
-                }
+                <!-- Always rendered so asynchronous login/verify results are announced. -->
+                <span [id]="'jira-status-' + id" role="status" aria-atomic="true">
+                  @if(isJiraLoginBusy(id)) {
+                    <span class="text-xs font-medium text-slate-600 dark:text-slate-300">Venter på login i Jira-vinduet...</span>
+                  } @else if(verify?.ok) {
+                    <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300">Forbindelsen er verificeret.</span>
+                  } @else if (verify && !verify.ok) {
+                    <span class="text-xs font-medium text-rose-700 dark:text-rose-300">{{verify.error}}</span>
+                  }
+                </span>
               </div>
               @if(verify?.ok) {
                 <div class="mt-2 text-xs text-slate-600 dark:text-slate-300 grid grid-cols-1 md:grid-cols-2 gap-1">
@@ -285,63 +278,13 @@
       </section>
 
       <section class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 p-4">
-        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Notifikationer</h3>
+        <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-3">Påmindelser</h3>
         <div class="space-y-3">
-          <div class="flex items-start gap-3">
-            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="auto_focus_on_slot" aria-describedby="auto-focus-help">
-              <span class="leading-tight">
-                Bring vinduet i front og åbn logdialogen automatisk når et interval er afsluttet
-                <span id="auto-focus-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Aktivér for aktiv/påtrængende påmindelse. Deaktiver hvis du kun ønsker passive notifikationer.</span>
-              </span>
-            </label>
-          </div>
-
-          <div class="flex items-start gap-3">
-            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="notification_silent" aria-describedby="notif-silent-help">
-              <span class="leading-tight">
-                Stille notifikationer (ingen lyd)
-                <span id="notif-silent-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Fjern markering for at tillade systemlyd når et nyt interval er klar.</span>
-              </span>
-            </label>
-          </div>
-
-          <div class="flex items-start gap-3">
-            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="group_notifications" aria-describedby="group-notif-help">
-              <span class="leading-tight">
-                Gruppér notifikationer når væk
-                <span id="group-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Akkumuler flere intervaller til én opsummering hvis du er væk fra computeren.</span>
-              </span>
-            </label>
-          </div>
-
-          <div class="flex items-start gap-3">
-            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="minimize_after_notification_submit" aria-describedby="minimize-after-notif-help">
-              <span class="leading-tight">
-                Minimer appen igen efter logning fra notifikation
-                <span id="minimize-after-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Når logdialogen er åbnet fra en notifikation og du gemmer en registrering, minimeres vinduet automatisk så du hurtigt kan fortsætte arbejdet.</span>
-              </span>
-            </label>
-          </div>
-
-          <div class="flex items-start gap-3">
-            <label class="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-              <input type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500" formControlName="island_os_notifications" aria-describedby="island-os-notif-help">
-              <span class="leading-tight">
-                Vis også Windows-notifikationer når øen er synlig
-                <span id="island-os-notif-help" class="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1">Som standard pulserer og udvider øen sig i stedet for at vise en notifikation. Skjult eller minimeret app bruger altid notifikationer.</span>
-              </span>
-            </label>
-          </div>
-
-          <div class="flex flex-col gap-2 pt-1">
-            <label class="text-sm font-medium text-slate-600 dark:text-slate-300">Stale interval tærskel (minutter)</label>
-            <input type="number" min="1" formControlName="stale_threshold_minutes"
+          <div class="flex flex-col gap-2">
+            <label for="stale-threshold-minutes" class="text-sm font-medium text-slate-600 dark:text-slate-300">Stale interval tærskel (minutter)</label>
+            <input id="stale-threshold-minutes" type="number" min="1" required formControlName="stale_threshold_minutes"
               class="w-40 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" aria-describedby="stale-help" />
-            <p id="stale-help" class="text-xs text-slate-500 dark:text-slate-400">Når et ulogget interval overstiger denne grænse, vises en påmindelse om at registrere tiden.</p>
+            <p id="stale-help" class="text-xs text-slate-500 dark:text-slate-400">Ved hvert afsluttet interval minder øen dig om at registrere tiden. Når et ulogget interval overstiger denne grænse, pulserer øen igen. Mindst 1 minut.</p>
           </div>
         </div>
       </section>

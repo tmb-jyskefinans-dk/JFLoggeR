@@ -1,7 +1,7 @@
 @if (!island.expanded()) {
   <div class="island-pill island-shoulders island-surface island-outline cursor-pointer"
     [class.island-idle]="idle()"
-    [class.island-pulse-slot]="pulseKind() === 'slot' || pulseKind() === 'digest'"
+    [class.island-pulse-slot]="pulseKind() === 'slot'"
     [class.island-pulse-stale]="pulseKind() === 'stale'"
     role="button" tabindex="0"
     [attr.aria-label]="'Udvid log-øen. ' + pendingCount() + ' ventende intervaller. ' + loggedLabel() + ' logget i dag.'"
@@ -152,7 +152,7 @@
       @if (island.manual()) {
         <log-dialog variant="inline" [manualMode]="true" [manualInitialDate]="clock.today()" (closed)="island.collapse()" />
       } @else {
-        <log-dialog variant="inline" [openedFromNotification]="island.openedFromPrompt()" [prefillPrevious]="island.prefill()" (closed)="island.collapse()" />
+        <log-dialog variant="inline" [openedFromPrompt]="island.openedFromPrompt()" [prefillPrevious]="island.prefill()" (closed)="island.collapse()" />
       }
     </div>
   </div>

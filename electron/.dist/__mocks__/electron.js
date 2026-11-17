@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.safeStorage = exports.ipcMain = exports.Notification = exports.BrowserWindow = exports.app = void 0;
+exports.safeStorage = exports.ipcMain = exports.BrowserWindow = exports.app = void 0;
 const tslib_1 = require("tslib");
 const fs = tslib_1.__importStar(require("node:fs"));
 const path = tslib_1.__importStar(require("node:path"));
@@ -18,8 +18,6 @@ exports.app = {
     setAppUserModelId(_id) { }
 };
 exports.BrowserWindow = class {
-};
-exports.Notification = class {
 };
 exports.ipcMain = { handle: () => { } };
 exports.safeStorage = {

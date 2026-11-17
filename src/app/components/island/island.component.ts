@@ -111,7 +111,7 @@ export class IslandComponent implements OnDestroy {
 
   busy = signal(false);
   justLogged = signal<Array<{ day: string; start: string }> | null>(null);
-  pulseKind = signal<'slot' | 'stale' | 'digest' | null>(null);
+  pulseKind = signal<'slot' | 'stale' | null>(null);
   private pulseTimer: ReturnType<typeof setTimeout> | null = null;
   private undoTimer: ReturnType<typeof setTimeout> | null = null;
   private panelContent = viewChild<ElementRef<HTMLElement>>('panelContent');

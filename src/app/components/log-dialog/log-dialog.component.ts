@@ -18,7 +18,7 @@ import { effectiveSlotMinutes } from '../../models/work-schedule';
 })
 export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   closed = output<void>();
-  openedFromNotification = input(false);
+  openedFromPrompt = input(false);
   manualMode = input(false);
   manualInitialDate = input<string>('');
   variant = input<'modal' | 'inline'>('modal');
@@ -69,6 +69,8 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   jiraActiveIndex = signal<number>(-1);
   private jiraDebounceHandle: ReturnType<typeof setTimeout> | null = null;
   private submitFocusRetryHandle: ReturnType<typeof setTimeout> | null = null;
+  private promptSubmitFocusedAt = 0;
+  private readonly promptSubmitGuardMs = 600;
   private readonly jiraMinTermLength = 2;
   private readonly jiraLookupDebounceMs = 300;
   allSelected = computed(() => {
@@ -146,7 +148,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
         return;
       }
       if (this.dayLocked()) return;
-      if (this.openedFromNotification()) this.focusSubmitWhenReady();
+      if (this.openedFromPrompt()) this.focusSubmitWhenReady();
       else this.descInput?.nativeElement.focus();
     });
   }
@@ -166,6 +168,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     const btn = this.submitBtn?.nativeElement;
     if (btn && !btn.disabled) {
       btn.focus();
+      this.promptSubmitFocusedAt = Date.now();
       return;
     }
     if (attempt >= 12) {
@@ -230,8 +233,9 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     let finalDescription = category === 'Andet' ? otherDescription : baseDescription;
     if (!slots.length || !category || !finalDescription) return;
     if (this.jiraSelectionRequired() && !this.hasValidSelectedJiraIssue()) return;
-    const minimizeAfterSubmit = this.openedFromNotification() && !!this.ipc.settings()?.minimize_after_notification_submit;
-    await this.ipc.submitPending(slots, finalDescription, category, { minimizeWindowAfterSubmit: minimizeAfterSubmit });
+    // The window is brought forward by a timer; ignore an Enter meant for another app.
+    if (Date.now() - this.promptSubmitFocusedAt < this.promptSubmitGuardMs) return;
+    await this.ipc.submitPending(slots, finalDescription, category);
     // Derive affected day from first slot and trigger reload of day & summary signals
     if (slots.length) {
       const day = slots[0].split('T')[0];

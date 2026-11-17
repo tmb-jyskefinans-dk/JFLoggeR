@@ -12,7 +12,7 @@ describe('LogDialogComponent', () => {
   const preselectedSlots = signal<string[] | null>(null);
   const lastPromptSlot = signal<string | null>(null);
   const recent = signal<any[]>([]);
-  const settings = signal<any>({ slot_minutes: 15, minimize_after_notification_submit: false });
+  const settings = signal<any>({ slot_minutes: 15 });
   const bulkSelectAllFlag = signal(false);
 
   const ipcMock = {
@@ -34,7 +34,7 @@ describe('LogDialogComponent', () => {
     preselectedSlots.set(null);
     lastPromptSlot.set(null);
     recent.set([]);
-    settings.set({ slot_minutes: 15, minimize_after_notification_submit: false });
+    settings.set({ slot_minutes: 15 });
     bulkSelectAllFlag.set(false);
     for (const spy of ['loadRecent', 'submitPending', 'loadDay', 'searchJiraIssues']) {
       ((ipcMock as any)[spy] as jasmine.Spy).calls.reset();
@@ -70,7 +70,7 @@ describe('LogDialogComponent', () => {
 
   it('focuses description input on manual open', fakeAsync(() => {
     pendingSlots.set(['2026-05-19T12:00']);
-    fixture.componentRef.setInput('openedFromNotification', false);
+    fixture.componentRef.setInput('openedFromPrompt', false);
 
     fixture.detectChanges();
     flushMicrotasks();
@@ -80,11 +80,11 @@ describe('LogDialogComponent', () => {
     expect(document.activeElement).toBe(descInput);
   }));
 
-  it('focuses submit button on notification open', fakeAsync(() => {
+  it('focuses submit button on interval prompt open', fakeAsync(() => {
     pendingSlots.set(['2026-05-19T12:00']);
     component.category.set('Projekt');
     component.description.set('Arbejde');
-    fixture.componentRef.setInput('openedFromNotification', true);
+    fixture.componentRef.setInput('openedFromPrompt', true);
 
     fixture.detectChanges();
     flushMicrotasks();
@@ -93,6 +93,24 @@ describe('LogDialogComponent', () => {
     expect(submitButton).toBeTruthy();
     expect(submitButton.disabled).toBeFalse();
     expect(document.activeElement).toBe(submitButton);
+  }));
+
+  it('ignores a submit right after the interval prompt focused submit', fakeAsync(() => {
+    pendingSlots.set(['2026-05-19T12:00']);
+    component.category.set('Projekt');
+    component.description.set('Arbejde');
+    fixture.componentRef.setInput('openedFromPrompt', true);
+    fixture.detectChanges();
+    flushMicrotasks();
+
+    void component.submit();
+    flushMicrotasks();
+    expect((ipcMock as any).submitPending).not.toHaveBeenCalled();
+
+    tick(700);
+    void component.submit();
+    flushMicrotasks();
+    expect((ipcMock as any).submitPending).toHaveBeenCalled();
   }));
 
   it('keeps existing multi-selection when a new prompt slot arrives', () => {

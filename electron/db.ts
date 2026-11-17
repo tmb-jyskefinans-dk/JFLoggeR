@@ -12,7 +12,7 @@ import {
 } from './work-schedule';
 import {
   LEGACY_ONPREM_CONNECTION_ID,
-  migrateLegacyJiraSettings,
+  migrateStoredJiraConnections,
   normalizeActiveJiraConnectionId,
   normalizeJiraConnections,
   type JiraConnection
@@ -38,19 +38,14 @@ export type Settings = {
   include_active_slot?: boolean; // deprecated: pending queue is end-time-only
   azure_tenant_id?: string;      // Microsoft Entra tenant ID (not a secret)
   azure_client_id?: string;      // Microsoft Entra app registration client ID (not a secret)
-  auto_focus_on_slot?: boolean; // bring app to front & open dialog on new slot
-  notification_silent?: boolean; // notifications play no sound when true
   stale_threshold_minutes?: number; // minutes beyond slot length before stale prompt
   auto_start_on_login?: boolean; // launch app on OS login
-  group_notifications?: boolean; // consolidate missed notifications when away
-  minimize_after_notification_submit?: boolean; // minimize app after logging from notification-opened dialog
-  jira_connections?: JiraConnection[]; // configured Jira instances (on-prem and/or cloud)
+  jira_connections?: JiraConnection[]; // configured Jira Cloud sites (browser login)
   jira_active_connection_id?: string; // connection used for search and worklogs
   jira_log_on_afstem?: boolean; // automatically post Jira worklogs when marking a day as afstemt
   window_mode?: 'docked' | 'detached'; // last used window mode, restored on startup
   detached_bounds?: { x: number; y: number; width: number; height: number } | null;
   dock_center_ratio?: number; // horizontal island position along the top edge (0..1)
-  island_os_notifications?: boolean; // also show OS toasts while the island is visible
   flex_enabled?: boolean; // show the +/- flex balance against the work schedule
   flex_start_date?: string; // 'YYYY-MM-DD' to count the balance from ('' = first logged day)
   flex_exclude_andet?: boolean; // 'Andet' is flex time off and does not count as worked time
@@ -82,19 +77,14 @@ const DEFAULT_SETTINGS: Settings = {
   include_active_slot: false,
   azure_tenant_id: '',
   azure_client_id: '',
-  auto_focus_on_slot: false,
-  notification_silent: true,
   stale_threshold_minutes: 45,
   auto_start_on_login: false,
-  group_notifications: true,
-  minimize_after_notification_submit: false,
   jira_connections: [],
   jira_active_connection_id: '',
   jira_log_on_afstem: false,
   window_mode: 'docked',
   detached_bounds: null,
   dock_center_ratio: 0.5,
-  island_os_notifications: false,
   flex_enabled: true,
   flex_start_date: '',
   flex_exclude_andet: true
@@ -190,26 +180,24 @@ export function initDb() {
       db.data.settings.azure_client_id = DEFAULT_SETTINGS.azure_client_id!;
       changed = true;
     }
-    if (typeof db.data.settings.auto_focus_on_slot !== 'boolean') {
-      db.data.settings.auto_focus_on_slot = DEFAULT_SETTINGS.auto_focus_on_slot!;
-      changed = true;
+    // OS notification settings were removed; the island is the only reminder channel.
+    const legacyNotify = db.data.settings as Settings & Record<string, unknown>;
+    for (const key of ['auto_focus_on_slot', 'notification_silent', 'group_notifications', 'minimize_after_notification_submit', 'island_os_notifications']) {
+      if (key in legacyNotify) { delete legacyNotify[key]; changed = true; }
     }
-    if (typeof db.data.settings.notification_silent !== 'boolean') { db.data.settings.notification_silent = DEFAULT_SETTINGS.notification_silent!; changed = true; }
     if (typeof db.data.settings.stale_threshold_minutes !== 'number') { db.data.settings.stale_threshold_minutes = DEFAULT_SETTINGS.stale_threshold_minutes!; changed = true; }
     if (typeof db.data.settings.auto_start_on_login !== 'boolean') { db.data.settings.auto_start_on_login = DEFAULT_SETTINGS.auto_start_on_login!; changed = true; }
-    if (typeof db.data.settings.group_notifications !== 'boolean') { db.data.settings.group_notifications = DEFAULT_SETTINGS.group_notifications!; changed = true; }
-    if (typeof db.data.settings.minimize_after_notification_submit !== 'boolean') { db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit!; changed = true; }
     const legacyJira = db.data.settings as Settings & { jira_psa_key?: unknown; jira_project_key?: unknown };
-    if (!Array.isArray(legacyJira.jira_connections)) {
-      legacyJira.jira_connections = migrateLegacyJiraSettings(legacyJira);
-      changed = true;
-    }
+    // Only Jira Cloud with browser login is supported; on-prem and API-token connections are migrated away.
+    const migratedJira = migrateStoredJiraConnections(legacyJira.jira_connections);
+    if (JSON.stringify(migratedJira) !== JSON.stringify(legacyJira.jira_connections ?? null)) changed = true;
+    legacyJira.jira_connections = migratedJira;
     if ('jira_psa_key' in legacyJira || 'jira_project_key' in legacyJira) {
       delete legacyJira.jira_psa_key;
       delete legacyJira.jira_project_key;
       changed = true;
     }
-    const activeJiraId = normalizeActiveJiraConnectionId(legacyJira.jira_connections, legacyJira.jira_active_connection_id);
+    const activeJiraId = normalizeActiveJiraConnectionId(migratedJira, legacyJira.jira_active_connection_id);
     if (legacyJira.jira_active_connection_id !== activeJiraId) { legacyJira.jira_active_connection_id = activeJiraId; changed = true; }
     const encrypted = encryptConnectionTokens(legacyJira.jira_connections);
     if (encrypted.some((c, i) => c.token !== legacyJira.jira_connections![i].token)) {
@@ -220,7 +208,6 @@ export function initDb() {
     if (db.data.settings.window_mode !== 'docked' && db.data.settings.window_mode !== 'detached') { db.data.settings.window_mode = DEFAULT_SETTINGS.window_mode; changed = true; }
     if (db.data.settings.detached_bounds === undefined) { db.data.settings.detached_bounds = null; changed = true; }
     if (typeof db.data.settings.dock_center_ratio !== 'number' || !Number.isFinite(db.data.settings.dock_center_ratio)) { db.data.settings.dock_center_ratio = 0.5; changed = true; }
-    if (typeof db.data.settings.island_os_notifications !== 'boolean') { db.data.settings.island_os_notifications = DEFAULT_SETTINGS.island_os_notifications!; changed = true; }
     if (typeof db.data.settings.flex_enabled !== 'boolean') { db.data.settings.flex_enabled = DEFAULT_SETTINGS.flex_enabled; changed = true; }
     if (typeof db.data.settings.flex_start_date !== 'string') { db.data.settings.flex_start_date = DEFAULT_SETTINGS.flex_start_date; changed = true; }
     if (typeof db.data.settings.flex_exclude_andet !== 'boolean') { db.data.settings.flex_exclude_andet = DEFAULT_SETTINGS.flex_exclude_andet; changed = true; }
@@ -258,12 +245,8 @@ export function saveSettings(s: Settings) {
     include_active_slot: false,
     azure_tenant_id: String(s.azure_tenant_id ?? '').trim(),
     azure_client_id: String(s.azure_client_id ?? '').trim(),
-    auto_focus_on_slot: !!s.auto_focus_on_slot,
-    notification_silent: !!s.notification_silent,
     stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes!,
     auto_start_on_login: !!s.auto_start_on_login,
-    group_notifications: !!s.group_notifications,
-    minimize_after_notification_submit: !!s.minimize_after_notification_submit,
     jira_connections: encryptConnectionTokens(jiraConnections),
     jira_active_connection_id: normalizeActiveJiraConnectionId(jiraConnections, s.jira_active_connection_id ?? prev?.jira_active_connection_id),
     jira_log_on_afstem: !!s.jira_log_on_afstem,
@@ -271,7 +254,6 @@ export function saveSettings(s: Settings) {
     window_mode: s.window_mode === 'detached' || s.window_mode === 'docked' ? s.window_mode : (prev?.window_mode ?? 'docked'),
     detached_bounds: s.detached_bounds !== undefined ? s.detached_bounds : (prev?.detached_bounds ?? null),
     dock_center_ratio: typeof s.dock_center_ratio === 'number' ? s.dock_center_ratio : (prev?.dock_center_ratio ?? 0.5),
-    island_os_notifications: s.island_os_notifications !== undefined ? !!s.island_os_notifications : !!prev?.island_os_notifications,
     flex_enabled: s.flex_enabled !== undefined ? !!s.flex_enabled : (prev?.flex_enabled ?? DEFAULT_SETTINGS.flex_enabled),
     flex_start_date: s.flex_start_date === undefined
       ? (prev?.flex_start_date ?? '')

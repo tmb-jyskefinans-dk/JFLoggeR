@@ -1,5 +1,5 @@
 // electron/main.ts
-import { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, powerMonitor, screen, net, session, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, net, session, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -27,10 +27,9 @@ function writeLog(level: string, message: string, meta?: any) {
   } catch (e) { /* last-chance; avoid throwing in logger */ }
 }
 
-type JiraHttpResponse = { status: number; ok: boolean; json: () => Promise<unknown> };
+type JiraHttpResponse = { status: number; ok: boolean; text: string; json: () => Promise<unknown> };
 
-// Chromium's network stack verifies TLS against the Windows certificate store (where the corporate CA lives)
-// and honours the system proxy, so no certificate checks need to be disabled for on-prem Jira.
+// Chromium's network stack verifies TLS against the Windows certificate store and honours the system proxy.
 async function jiraRequest(
   connection: JiraConnection,
   method: 'GET' | 'POST' | 'DELETE',
@@ -39,18 +38,20 @@ async function jiraRequest(
 ): Promise<JiraHttpResponse> {
   const headers: Record<string, string> = { ...jiraAuthHeaders(connection) };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const res = await net.fetch(url, {
+  const init = {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
-    // Never follow redirects with the Authorization header or use ambient browser cookies.
-    redirect: 'error',
-    credentials: 'omit'
-  });
+    // Never follow redirects with credentials attached.
+    redirect: 'error' as const
+  };
+  // Authenticates with the captured session cookie, held in an isolated per-connection session.
+  const res = await (await jiraCookieRequestSession(connection)).fetch(url, { ...init, credentials: 'include' });
   const bodyText = await res.text();
   return {
     status: res.status,
     ok: res.ok,
+    text: bodyText,
     json: async () => bodyText ? JSON.parse(bodyText) : {}
   };
 }
@@ -82,9 +83,14 @@ ipcMain.handle = (channel: string, listener: (event: IpcMainInvokeEvent, ...args
   });
 
 app.on('web-contents-created', (_e, contents) => {
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // The Jira login window must follow redirects through Atlassian and the user's identity provider.
+  const isJiraLogin = isJiraLoginContents(contents);
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isJiraLogin && isAllowedJiraLoginUrl(url)) contents.loadURL(url).catch(() => { /* ignore */ });
+    return { action: 'deny' };
+  });
   const blockForeignNavigation = (event: Electron.Event, url: string) => {
-    if (!isAppUrl(url)) event.preventDefault();
+    if (isJiraLogin ? !isAllowedJiraLoginUrl(url) : !isAppUrl(url)) event.preventDefault();
   };
   contents.on('will-navigate', blockForeignNavigation);
   contents.on('will-redirect', blockForeignNavigation);
@@ -171,6 +177,7 @@ import {
 import { computeStaleSlot } from './stale';
 import { setExternalLogged, getExternalLogged } from './db';
 import { azureAuth } from './auth';
+import { isAllowedJiraLoginUrl, isJiraLoginContents, jiraCookieRequestSession, loginJiraViaBrowser } from './jira-browser-auth';
 
 import {
   nextQuarter,
@@ -218,47 +225,17 @@ try {
     require('update-electron-app')({
       // updateInterval: '1 hour', // uncomment to poll periodically
     });
-    // Hook into underlying electron-updater events to notify user.
+    // Updates are installed silently on next restart; events are only logged.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { autoUpdater } = require('electron-updater');
     autoUpdater.on('checking-for-update', () => console.log('[update] checking for update...'));
-    autoUpdater.on('update-available', (info: any) => {
-      console.log('[update] update available', info?.version);
-
-      try {
-        const n = new Notification({
-          title: 'Ny opdatering klar',
-          body: `Version ${info?.version} er tilgængelig.`,
-          silent: !!getSettings().notification_silent
-        });
-        n.show();
-        // Also inform renderer in case it wants to surface a UI prompt.
-        win?.webContents.send('update:ready', { version: info?.version });
-      } catch (notifyErr) { console.warn('[update] update available notify failed', notifyErr); }
-
-
-    });
+    autoUpdater.on('update-available', (info: any) => console.log('[update] update available', info?.version));
     autoUpdater.on('update-not-available', () => console.log('[update] no update available'));
     autoUpdater.on('error', (err: any) => console.warn('[update] error', err));
     autoUpdater.on('download-progress', (p: any) => {
       try { console.log('[update] download progress', Math.round(p.percent) + '%'); } catch { }
     });
-    autoUpdater.on('update-downloaded', (info: any) => {
-      console.log('[update] downloaded', info?.version);
-      try {
-        const n = new Notification({
-          title: 'Opdatering klar',
-          body: `Version ${info?.version} er klar. Genstart for at installere nu.`,
-          silent: !!getSettings().notification_silent
-        });
-        n.on('click', () => {
-          try { autoUpdater.quitAndInstall(); } catch { }
-        });
-        n.show();
-        // Also inform renderer in case it wants to surface a UI prompt.
-        win?.webContents.send('update:ready', { version: info?.version });
-      } catch (notifyErr) { console.warn('[update] notify failed', notifyErr); }
-    });
+    autoUpdater.on('update-downloaded', (info: any) => console.log('[update] downloaded', info?.version));
   } else {
     console.log('[main] skipping auto-update init (development environment)');
   }
@@ -272,7 +249,6 @@ const pending: Set<string> = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
 let tickerHandle: NodeJS.Timeout | null = null; // current scheduled tick timeout
 let staleCheckHandle: NodeJS.Timeout | null = null;
 let lastStaleNotifiedKey: string | null = null;
-let digestQueue: Date[] = []; // slots accumulated while user away
 let lastEntryEndTime: Date | null = null; // for stale detection heuristics
 const jiraMyselfCache = new Map<string, { accountId?: string; displayName?: string; emailAddress?: string }>();
 let windowMode: WindowMode = 'compact';
@@ -299,7 +275,7 @@ type JiraResolvedIdentity = {
 };
 
 function jiraIdentityCacheKey(c: JiraConnection): string {
-  return [c.type, c.base_url, c.email, c.token].join('|');
+  return [c.base_url, c.token].join('|');
 }
 
 async function resolveJiraIdentity(connection: JiraConnection): Promise<JiraResolvedIdentity | undefined> {
@@ -316,7 +292,7 @@ async function resolveJiraIdentity(connection: JiraConnection): Promise<JiraReso
     }
 
     const data = await res.json() as JiraMyselfResponse;
-    const accountId = jiraUserIdFromMyself(connection, data);
+    const accountId = jiraUserIdFromMyself(data);
     const displayName = String(data.displayName ?? '').trim() || undefined;
     const emailAddress = String(data.emailAddress ?? '').trim() || undefined;
     jiraMyselfCache.set(cacheKey, { accountId, displayName, emailAddress });
@@ -418,13 +394,28 @@ function applyWindowMode(mode: WindowMode, opts: { focus?: boolean; bounds?: Rec
   try { win.webContents.send('window:mode', { mode }); } catch { }
 }
 
-/** Visible docked island takes over slot prompts from OS toasts. */
-function islandVisible(): boolean {
-  return !!win && isDockedMode(windowMode) && win.isVisible() && !win.isMinimized();
+function pulseIsland(kind: 'slot' | 'stale', slot?: string) {
+  try { win?.webContents.send('island:pulse', { kind, slot }); } catch { }
 }
 
-function pulseIsland(kind: 'slot' | 'stale' | 'digest', slot?: string) {
-  try { win?.webContents.send('island:pulse', { kind, slot }); } catch { }
+/**
+ * The island is the only reminder channel. A visible detached window stays detached
+ * (returns true so the caller opens the log dialog there); a hidden or minimized window
+ * is re-docked and shown as the compact island.
+ */
+function surfaceReminder(): { detached: boolean } {
+  if (!win) return { detached: false };
+  const visible = win.isVisible() && !win.isMinimized();
+  if (windowMode === 'detached' && visible) {
+    bringWindowToFront();
+    return { detached: true };
+  }
+  if (!visible) {
+    try { if (win.isMinimized()) win.restore(); } catch { }
+    if (windowMode !== 'compact') applyWindowMode('compact');
+    try { win.showInactive(); } catch { }
+  }
+  return { detached: false };
 }
 
 function bringWindowToFront() {
@@ -479,13 +470,13 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
-      // Ensure timers (notifications ticker, stale checks) continue firing with accurate cadence
+      // Ensure timers (interval ticker, stale checks) continue firing with accurate cadence
       // even when window is unfocused or minimized. This prevents delayed queue updates.
       backgroundThrottling: false
     }
   });
 
-  // Update to new branded AppUserModelID (must match package.json build.appId for notifications & taskbar grouping)
+  // Update to new branded AppUserModelID (must match package.json build.appId for taskbar grouping)
   app.setAppUserModelId('com.jyskefinans.jfloggr');
 
   const devUrl = devServerUrl();
@@ -534,71 +525,17 @@ function updateTrayTooltip() {
   } catch (e) { console.error('[main] updateTrayTooltip failed', e); }
 }
 
-function showDigestNotification() {
-  if (!digestQueue.length) return;
-  // Capture the earliest & latest slot BEFORE we clear the queue so the notification click handler
-  // can reference a stable value. Previously we referenced digestQueue[0] inside the click handler
-  // after digestQueue was cleared, causing slotKey(undefined) -> TypeError.
-  const firstSlot = digestQueue[0];
-  const lastSlot = digestQueue[digestQueue.length - 1];
-  if (!firstSlot || !lastSlot) { digestQueue = []; return; }
-  const body = `${digestQueue.length} uloggede intervaller fra ${firstSlot.getHours().toString().padStart(2, '0')}:${firstSlot.getMinutes().toString().padStart(2, '0')} til ${lastSlot.getHours().toString().padStart(2, '0')}:${lastSlot.getMinutes().toString().padStart(2, '0')}`;
-  const st = getSettings();
-  const n = new Notification({ title: 'Opsummering af uloggede intervaller', body, silent: !!st.notification_silent });
-  n.on('click', () => {
-    if (win) {
-      bringWindowToFront();
-      // Open prompt for earliest slot captured at notification creation time.
-      win?.webContents.send('prompt:open', { slot: slotKey(firstSlot), source: 'notification' });
-      // Force open dialog even if slot was previously handled so user can re-log or review.
-      win?.webContents.send('dialog:open-log', { slot: slotKey(firstSlot), source: 'notification' });
-    }
-  });
-  n.show();
-  digestQueue = [];
-}
-
-function notifyForSlot(slot: Date) {
-  const day = toLocalDateYMD(slot);
-  const hh = `${slot.getHours()}`.padStart(2, '0');
-  const mm = `${slot.getMinutes()}`.padStart(2, '0');
-  const slotLen = getSlotMinutes();
-  const slotEnd = new Date(slot.getTime() + slotLen * 60000);
-  const endHh = `${slotEnd.getHours()}`.padStart(2, '0');
-  const endMm = `${slotEnd.getMinutes()}`.padStart(2, '0');
-  const body = `Log ${day} ${hh}:${mm}–${endHh}:${endMm}`;
-
-  const st = getSettings();
-  if (islandVisible()) {
-    pulseIsland('slot', slotKey(slot));
-    win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'island' });
-    if (!st.island_os_notifications) return;
+function remindForSlot(key: string, kind: 'slot' | 'stale') {
+  if (!win) return;
+  const { detached } = surfaceReminder();
+  if (detached) {
+    // Dialog opens even if this slot was handled before; the renderer focuses its Submit button.
+    win.webContents.send('prompt:open', { slot: key, source: 'interval' });
+    win.webContents.send('dialog:open-log', { slot: key, source: 'interval' });
+    return;
   }
-  const n = new Notification({ title: 'Tid til at registér tid', body, silent: !!st.notification_silent });
-  n.on('click', () => {
-    if (win) {
-      bringWindowToFront();
-      console.log('[main] notification click -> prompt:open', slotKey(slot));
-      win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'notification' });
-      // Also force dialog open regardless of prior handled state.
-      win?.webContents.send('dialog:open-log', { slot: slotKey(slot), source: 'notification' });
-    } else {
-      console.warn('[main] notification clicked but window is null');
-    }
-  });
-  // Group notifications when user away & grouping enabled
-  try {
-    const away = !win?.isFocused() || powerMonitor.getSystemIdleTime() > (getSlotMinutes() * 60);
-    if (away && st.group_notifications) {
-      digestQueue.push(slot);
-      // If many accumulated, send digest now
-      if (digestQueue.length >= 4) {
-        showDigestNotification();
-      }
-    } else {
-      n.show();
-    }
-  } catch { n.show(); }
+  pulseIsland(kind, key);
+  if (kind === 'slot') win.webContents.send('prompt:open', { slot: key, source: 'island' });
 }
 
 function scheduleTicker() {
@@ -609,7 +546,6 @@ function scheduleTicker() {
     if (shouldPromptForFinishedSlot(boundary, prevStart)) {
       const gran = getSlotMinutes();
       try { console.log('[main] tick boundary', { boundary: boundary.toISOString(), gran, prevStart: slotKey(prevStart) }); } catch { }
-      const sDyn = getSettings();
       const key = slotKey(prevStart);
       // Guard against re-queueing already logged slot
       const day = toLocalDateYMD(prevStart);
@@ -617,12 +553,7 @@ function scheduleTicker() {
       if (!alreadyLogged) {
         enqueuePending(key); // emits queue:updated
         try { console.log('[main] enqueue prevStart', key, 'pending size', pending.size); } catch { }
-        notifyForSlot(prevStart);
-        if (sDyn.auto_focus_on_slot && win) {
-          bringWindowToFront();
-          console.log('[main] auto-focus tick -> prompt:open (previous slot just finished)', key);
-          win?.webContents.send('prompt:open', { slot: key, source: 'auto-focus' });
-        }
+        remindForSlot(key, 'slot');
       }
     }
     tickerHandle = setTimeout(tick, nextQuarter(new Date()).getTime() - Date.now());
@@ -639,25 +570,10 @@ function scheduleStaleCheck() {
   if (staleCheckHandle) { try { clearInterval(staleCheckHandle); } catch { } }
   staleCheckHandle = setInterval(() => {
     try {
-      const st = getSettings();
-      const result = computeStaleSlot(Array.from(pending), new Date(), st, getSlotMinutes());
+      const result = computeStaleSlot(Array.from(pending), new Date(), getSettings(), getSlotMinutes());
       if (result && result.key !== lastStaleNotifiedKey) {
         lastStaleNotifiedKey = result.key;
-        const hm = result.key.split('T')[1];
-        const body = `Interval fra ${hm} er nu over ${Math.round(result.ageMinutes)} min uden registrering. Log tiden for at undgå at glemme den.`;
-        if (islandVisible()) {
-          pulseIsland('stale', result.key);
-          if (!st.island_os_notifications) return;
-        }
-        const n = new Notification({ title: 'Overvokset interval', body, silent: !!st.notification_silent });
-        n.on('click', () => {
-          if (win) {
-            bringWindowToFront();
-            win?.webContents.send('prompt:open', { slot: result.key, source: 'notification' });
-            win?.webContents.send('dialog:open-log', { slot: result.key, source: 'notification' });
-          }
-        });
-        n.show();
+        remindForSlot(result.key, 'stale');
       }
     } catch {/* ignore */ }
   }, 60000);
@@ -800,7 +716,7 @@ ipcMain.handle('db:save-settings', (_e, s) => {
   const after = getSettings();
   // Recalculate backlog for already elapsed slots only; future slots will be added by the ticker.
   rebuildPendingAfterSettingsChange({ includeFuture: false });
-  // If today was previously disabled and is now enabled, restart ticker + optional catch-up notification
+  // If today was previously disabled and is now enabled, restart ticker
   const now = new Date();
   const wasEnabled = (before.weekdays_mask & (1 << now.getDay())) !== 0;
   const isEnabled = (after.weekdays_mask & (1 << now.getDay())) !== 0;
@@ -846,7 +762,8 @@ ipcMain.handle('jira:search-issues', async (_e, payload: { term?: string }) => {
     const res = await jiraRequest(connection, 'GET', url);
 
     if (!res.ok) {
-      return { ok: false, error: `Jira opslag fejlede (${res.status}).` };
+      const expired = res.status === 401;
+      return { ok: false, error: expired ? 'Jira browser-session er udløbet. Log ind igen via browser under Indstillinger.' : `Jira opslag fejlede (${res.status}).` };
     }
 
     const data = await res.json() as { issues?: JiraApiIssue[] };
@@ -874,7 +791,7 @@ ipcMain.handle('jira:verify-identity', async (_e, payload?: { connection?: unkno
 
     const identity = await resolveJiraIdentity(connection);
     if (!identity?.accountId) {
-      return { ok: false, error: `Login kunne ikke verificeres mod Jira /myself (${connection.name}).` };
+      return { ok: false, error: `Login kunne ikke verificeres mod Jira /myself (${connection.name}). Sessionen kan være udløbet - log ind igen via browser.` };
     }
 
     return {
@@ -886,6 +803,17 @@ ipcMain.handle('jira:verify-identity', async (_e, payload?: { connection?: unkno
   } catch (e) {
     logIpcFailure('jira:verify-identity', e);
     return { ok: false, error: 'Jira verifikation fejlede.' };
+  }
+});
+
+ipcMain.handle('jira:browser-login', async (_e, payload?: { base_url?: unknown }) => {
+  try {
+    const result = await loginJiraViaBrowser(payload?.base_url, win);
+    if (result.ok) writeLog('info', 'Jira browser login completed', { expiresAt: result.expiresAt });
+    return result;
+  } catch (e) {
+    logIpcFailure('jira:browser-login', e);
+    return { ok: false, error: 'Jira-login fejlede.' };
   }
 });
 
@@ -946,7 +874,7 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
           connection,
           'POST',
           buildJiraWorklogUrl(connection, key),
-          buildJiraWorklogBody(connection, seconds, startedStr, 'Logged via JFLoggeR')
+          buildJiraWorklogBody(seconds, startedStr, 'Logged via JFLoggeR')
         );
         if (res.ok) {
           const body = await res.json() as { id?: unknown };
@@ -956,7 +884,7 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
             tracked.push({ key, worklogId, seconds, started: startedStr, logged_at: new Date().toISOString(), connection_id: connection.id });
           }
         } else {
-          const body = await res.json().catch(() => undefined);
+          const body = await res.json().catch(() => res.text);
           results.push({ key, seconds, success: false, error: describeJiraHttpError(res.status, body) });
         }
       } catch (e) {
@@ -1011,7 +939,7 @@ ipcMain.handle('jira:unset-afstemt', async (_e, payload: { day: string }) => {
           results.push({ key: row.key, worklogId: row.worklogId, success: true });
         } else {
           remaining.push(row);
-          const body = await res.json().catch(() => undefined);
+          const body = await res.json().catch(() => res.text);
           results.push({ key: row.key, worklogId: row.worklogId, success: false, error: describeJiraHttpError(res.status, body) });
         }
       } catch (e) {
@@ -1127,7 +1055,7 @@ ipcMain.handle(
   'queue:submit',
   (
     _e,
-    payload: { slots: string[]; description: string; category: string; minimizeWindowAfterSubmit?: boolean }
+    payload: { slots: string[]; description: string; category: string }
   ) => {
     const created: Array<{ day: string; start: string }> = [];
     try {
@@ -1189,29 +1117,9 @@ ipcMain.handle(
       }
     } catch { }
     updateTrayTooltip();
-    // The docked island collapses itself after submit; minimizing would hide it.
-    if (payload?.minimizeWindowAfterSubmit && windowMode === 'detached') {
-      try { win?.minimize(); } catch { }
-    }
     return { ok: true, created };
   }
 );
-
-// Debug notification trigger (manual test without waiting for scheduler)
-ipcMain.handle('debug:notify', (_e, opts?: { body?: string }) => {
-  if (app.isPackaged) return { ok: false };
-  const body = String(opts?.body ?? 'Test notification').slice(0, 200);
-  const slot = new Date();
-  const st = getSettings();
-  const n = new Notification({ title: 'Work Logger (Test)', body, silent: !!st.notification_silent });
-  n.on('click', () => {
-    bringWindowToFront();
-    win?.webContents.send('prompt:open', { slot: slotKey(slot), source: 'notification' });
-    win?.webContents.send('dialog:open-log', { slot: slotKey(slot), source: 'notification' });
-  });
-  n.show();
-  return { ok: true };
-});
 
 // Window control handlers (invoked from renderer via preload contextBridge)
 ipcMain.handle('window:minimize', () => {
@@ -1317,7 +1225,7 @@ ipcMain.on('window:pointer-drag', (_e, payload: { phase?: unknown; kind?: unknow
 });
 
 app.whenReady().then(() => {
-  // The renderer needs no browser permissions (notifications are shown from the main process).
+  // The renderer needs no browser permissions.
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   console.log('[main] app is ready, initializing DB and window...');
@@ -1377,7 +1285,6 @@ app.whenReady().then(() => {
             if (pending.size > 0) {
               win?.webContents.send('dialog:open-log-all');
             } else {
-              // Optionally could show a notification; for now silently ignore.
               console.log('[main] bulk log requested but no pending slots');
             }
           }
@@ -1420,7 +1327,7 @@ app.whenReady().then(() => {
   screen.on('display-removed', redockAfterDisplayChange);
   console.log('[main] rebuilding backlog for today...');
   rebuildBacklogForToday({ includeFuture: false });
-  console.log('[main] scheduling ticker for notifications...');
+  console.log('[main] scheduling interval ticker...');
   scheduleTicker();
   scheduleStaleCheck();
   console.log('[main] initialization complete.');
@@ -1432,12 +1339,6 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     console.log('[main] app activate event');
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-  app.on('browser-window-focus', () => {
-    // Flush digest queue when user returns
-    if (digestQueue.length) {
-      showDigestNotification();
-    }
   });
 });
 

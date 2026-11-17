@@ -11,7 +11,7 @@ const JIRA_AFSTEM_CATEGORIES = new Set([
 
 const JIRA_KEY_PREFIX = /^[A-Z]+-\d+\s*-\s*/;
 
-type JiraConnectionLike = { id?: unknown; name?: unknown; type?: unknown; base_url?: unknown; token?: unknown; email?: unknown };
+type JiraConnectionLike = { id?: unknown; name?: unknown; base_url?: unknown; token?: unknown };
 
 export function getActiveJiraConnection(settings: unknown): JiraConnectionLike | undefined {
   const s = (settings ?? {}) as { jira_connections?: unknown; jira_active_connection_id?: unknown };
@@ -22,8 +22,7 @@ export function getActiveJiraConnection(settings: unknown): JiraConnectionLike |
 
 export function isJiraConnectionUsable(c: JiraConnectionLike | null | undefined): boolean {
   if (!c) return false;
-  if (!String(c.base_url ?? '').trim() || !String(c.token ?? '').trim()) return false;
-  return c.type !== 'cloud' || !!String(c.email ?? '').trim();
+  return !!String(c.base_url ?? '').trim() && !!String(c.token ?? '').trim();
 }
 
 export function shouldJiraAutoLogOnAfstem(settings: unknown): boolean {

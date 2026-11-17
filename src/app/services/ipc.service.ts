@@ -67,16 +67,21 @@ export interface JiraIdentityResult {
   error?: string;
 }
 
-export type JiraDeployment = 'server' | 'cloud';
-
+/** A Jira Cloud site authenticated with a session cookie captured via browser login. */
 export interface JiraConnection {
   id: string;
   name: string;
-  type: JiraDeployment;
   base_url: string;
   project_key: string;
   token: string;
-  email: string;
+}
+
+export interface JiraBrowserLoginResult {
+  ok: boolean;
+  token?: string;
+  expiresAt?: number;
+  cancelled?: boolean;
+  error?: string;
 }
 
 export interface FlexDay {
@@ -96,7 +101,7 @@ export interface FlexBalance {
 
 export type WindowMode = 'compact' | 'expanded' | 'detached';
 export type PointerDragKind = 'move' | 'resize-e' | 'resize-s' | 'resize-se';
-export interface IslandPulse { kind: 'slot' | 'stale' | 'digest'; slot?: string; at: number; }
+export interface IslandPulse { kind: 'slot' | 'stale'; slot?: string; at: number; }
 
 function isWindowMode(v: unknown): v is WindowMode {
   return v === 'compact' || v === 'expanded' || v === 'detached';
@@ -114,12 +119,11 @@ declare global {
       getPendingSlots(): Promise<string[]>;
       getSettings(): Promise<any>;
       saveSettings(settings: any): Promise<void>;
-      submitSlots(payload: { slots: string[]; description: string; category: string; minimizeWindowAfterSubmit?: boolean }): Promise<{ ok: boolean; error?: string; created?: Array<{ day: string; start: string }> }>;
+      submitSlots(payload: { slots: string[]; description: string; category: string }): Promise<{ ok: boolean; error?: string; created?: Array<{ day: string; start: string }> }>;
       deleteEntry(day: string, start: string): Promise<{ ok: boolean; removed?: number; error?: string }>;
       onPrompt(cb: (d: { slot?: string; source?: string }) => void): (() => void) | void;
       onFocus(cb: () => void): (() => void) | void;
       onAppReady?: (cb: () => void) => (() => void) | void;
-      sendTestNotification?(body?: string): Promise<{ ok: boolean }>;
       onQueueUpdated?(cb: () => void): (() => void) | void;
       minimizeWindow?(): Promise<{ ok: boolean }>;
       toggleMaximizeWindow?(): Promise<{ ok: boolean; maximized?: boolean }>;
@@ -137,6 +141,7 @@ declare global {
       jiraGetLoggedWorklogs?(day: string): Promise<{ ok: boolean; items?: JiraLoggedWorklogPreview[]; error?: string }>;
       jiraUnsetAfstemt?(day: string): Promise<JiraUnsetAfstemtResult>;
       jiraVerifyIdentity?(payload?: { connection?: JiraConnection }): Promise<JiraIdentityResult>;
+      jiraBrowserLogin?(baseUrl: string): Promise<JiraBrowserLoginResult>;
       getIslandMode?(): Promise<{ mode: string }>;
       setIslandMode?(mode: WindowMode, opts?: { focus?: boolean }): Promise<{ ok: boolean; mode: string }>;
       resizeIsland?(height: number): Promise<{ ok: boolean }>;
@@ -198,7 +203,7 @@ export class IpcService {
       window.workApi.onWindowMode?.((d) => { if (isWindowMode(d?.mode)) this.windowMode.set(d.mode); });
       window.workApi.onSnapHint?.((d) => this.snapHint.set(!!d?.active));
       window.workApi.onIslandPulse?.((d) => {
-        const kind = d?.kind === 'stale' || d?.kind === 'digest' ? d.kind : 'slot';
+        const kind = d?.kind === 'stale' ? 'stale' : 'slot';
         this.islandPulse.set({ kind, slot: typeof d?.slot === 'string' ? d.slot : undefined, at: Date.now() });
       });
       (window.workApi as any).onNavigateToday?.((day: string) => {
@@ -366,8 +371,8 @@ export class IpcService {
       });
   }
 
-  submitPending(slots: string[], description: string, category: string, opts?: { minimizeWindowAfterSubmit?: boolean }) {
-    return window.workApi.submitSlots({ slots, description, category, minimizeWindowAfterSubmit: !!opts?.minimizeWindowAfterSubmit })
+  submitPending(slots: string[], description: string, category: string) {
+    return window.workApi.submitSlots({ slots, description, category })
       .then((resp) => {
         if (!resp?.ok) throw new Error(resp?.error || 'submitPending failed');
         this.loadPending();
@@ -388,10 +393,6 @@ export class IpcService {
         console.error('[ipc] deleteEntry failed', err);
         throw err;
       });
-  }
-
-  testNotify(body?: string) {
-    return window.workApi.sendTestNotification?.(body);
   }
 
   minimizeWindow() { return window.workApi.minimizeWindow?.(); }
@@ -483,6 +484,17 @@ export class IpcService {
       .catch((err) => {
         console.error('[ipc] verifyJiraIdentity failed', err);
         return { ok: false, error: 'Jira verifikation fejlede.' };
+      });
+  }
+
+  loginJiraViaBrowser(baseUrl: string): Promise<JiraBrowserLoginResult> {
+    if (!window.workApi.jiraBrowserLogin) {
+      return Promise.resolve({ ok: false, error: 'Jira browser-login er ikke tilgængelig.' });
+    }
+    return window.workApi.jiraBrowserLogin(baseUrl)
+      .catch((err) => {
+        console.error('[ipc] loginJiraViaBrowser failed', err);
+        return { ok: false, error: 'Jira browser-login fejlede.' };
       });
   }
 

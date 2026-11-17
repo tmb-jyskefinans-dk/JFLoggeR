@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('workApi', {
 
   // Backlog queue
   getPendingSlots: () => ipcRenderer.invoke('queue:get'),
-  submitSlots: (payload: { slots: string[], description: string, category: string, minimizeWindowAfterSubmit?: boolean }) =>
+  submitSlots: (payload: { slots: string[], description: string, category: string }) =>
     ipcRenderer.invoke('queue:submit', payload),
 
   // Azure auth
@@ -32,8 +32,9 @@ contextBridge.exposeInMainWorld('workApi', {
   jiraGetLoggedWorklogs: (day: string) => ipcRenderer.invoke('jira:get-logged-worklogs', { day }),
   jiraUnsetAfstemt: (day: string) => ipcRenderer.invoke('jira:unset-afstemt', { day }),
   jiraVerifyIdentity: (payload?: { connection?: unknown }) => ipcRenderer.invoke('jira:verify-identity', payload ?? {}),
+  jiraBrowserLogin: (baseUrl: string) => ipcRenderer.invoke('jira:browser-login', { base_url: baseUrl }),
 
-  // Events from main (notifications clicked)
+  // Events from main (interval reminders, tray actions)
   onPrompt: (cb: (d: any) => void) => {
     const handler = (_e: Electron.IpcRendererEvent, d: any) => cb(d);
     ipcRenderer.on('prompt:open', handler);
@@ -71,9 +72,6 @@ contextBridge.exposeInMainWorld('workApi', {
     ipcRenderer.on('dialog:open-log-all', handler);
     return () => ipcRenderer.removeListener('dialog:open-log-all', handler);
   },
-  // Debug notification trigger
-  sendTestNotification: (body?: string) => ipcRenderer.invoke('debug:notify', { body })
-  ,
   // Window controls
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),

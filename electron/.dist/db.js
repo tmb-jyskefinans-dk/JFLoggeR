@@ -38,19 +38,14 @@ const DEFAULT_SETTINGS = {
     include_active_slot: false,
     azure_tenant_id: '',
     azure_client_id: '',
-    auto_focus_on_slot: false,
-    notification_silent: true,
     stale_threshold_minutes: 45,
     auto_start_on_login: false,
-    group_notifications: true,
-    minimize_after_notification_submit: false,
     jira_connections: [],
     jira_active_connection_id: '',
     jira_log_on_afstem: false,
     window_mode: 'docked',
     detached_bounds: null,
     dock_center_ratio: 0.5,
-    island_os_notifications: false,
     flex_enabled: true,
     flex_start_date: '',
     flex_exclude_andet: true
@@ -147,13 +142,13 @@ function initDb() {
             db.data.settings.azure_client_id = DEFAULT_SETTINGS.azure_client_id;
             changed = true;
         }
-        if (typeof db.data.settings.auto_focus_on_slot !== 'boolean') {
-            db.data.settings.auto_focus_on_slot = DEFAULT_SETTINGS.auto_focus_on_slot;
-            changed = true;
-        }
-        if (typeof db.data.settings.notification_silent !== 'boolean') {
-            db.data.settings.notification_silent = DEFAULT_SETTINGS.notification_silent;
-            changed = true;
+        // OS notification settings were removed; the island is the only reminder channel.
+        const legacyNotify = db.data.settings;
+        for (const key of ['auto_focus_on_slot', 'notification_silent', 'group_notifications', 'minimize_after_notification_submit', 'island_os_notifications']) {
+            if (key in legacyNotify) {
+                delete legacyNotify[key];
+                changed = true;
+            }
         }
         if (typeof db.data.settings.stale_threshold_minutes !== 'number') {
             db.data.settings.stale_threshold_minutes = DEFAULT_SETTINGS.stale_threshold_minutes;
@@ -163,25 +158,18 @@ function initDb() {
             db.data.settings.auto_start_on_login = DEFAULT_SETTINGS.auto_start_on_login;
             changed = true;
         }
-        if (typeof db.data.settings.group_notifications !== 'boolean') {
-            db.data.settings.group_notifications = DEFAULT_SETTINGS.group_notifications;
-            changed = true;
-        }
-        if (typeof db.data.settings.minimize_after_notification_submit !== 'boolean') {
-            db.data.settings.minimize_after_notification_submit = DEFAULT_SETTINGS.minimize_after_notification_submit;
-            changed = true;
-        }
         const legacyJira = db.data.settings;
-        if (!Array.isArray(legacyJira.jira_connections)) {
-            legacyJira.jira_connections = (0, jira_client_1.migrateLegacyJiraSettings)(legacyJira);
+        // Only Jira Cloud with browser login is supported; on-prem and API-token connections are migrated away.
+        const migratedJira = (0, jira_client_1.migrateStoredJiraConnections)(legacyJira.jira_connections);
+        if (JSON.stringify(migratedJira) !== JSON.stringify(legacyJira.jira_connections ?? null))
             changed = true;
-        }
+        legacyJira.jira_connections = migratedJira;
         if ('jira_psa_key' in legacyJira || 'jira_project_key' in legacyJira) {
             delete legacyJira.jira_psa_key;
             delete legacyJira.jira_project_key;
             changed = true;
         }
-        const activeJiraId = (0, jira_client_1.normalizeActiveJiraConnectionId)(legacyJira.jira_connections, legacyJira.jira_active_connection_id);
+        const activeJiraId = (0, jira_client_1.normalizeActiveJiraConnectionId)(migratedJira, legacyJira.jira_active_connection_id);
         if (legacyJira.jira_active_connection_id !== activeJiraId) {
             legacyJira.jira_active_connection_id = activeJiraId;
             changed = true;
@@ -205,10 +193,6 @@ function initDb() {
         }
         if (typeof db.data.settings.dock_center_ratio !== 'number' || !Number.isFinite(db.data.settings.dock_center_ratio)) {
             db.data.settings.dock_center_ratio = 0.5;
-            changed = true;
-        }
-        if (typeof db.data.settings.island_os_notifications !== 'boolean') {
-            db.data.settings.island_os_notifications = DEFAULT_SETTINGS.island_os_notifications;
             changed = true;
         }
         if (typeof db.data.settings.flex_enabled !== 'boolean') {
@@ -269,12 +253,8 @@ function saveSettings(s) {
         include_active_slot: false,
         azure_tenant_id: String(s.azure_tenant_id ?? '').trim(),
         azure_client_id: String(s.azure_client_id ?? '').trim(),
-        auto_focus_on_slot: !!s.auto_focus_on_slot,
-        notification_silent: !!s.notification_silent,
         stale_threshold_minutes: Number(s.stale_threshold_minutes) || DEFAULT_SETTINGS.stale_threshold_minutes,
         auto_start_on_login: !!s.auto_start_on_login,
-        group_notifications: !!s.group_notifications,
-        minimize_after_notification_submit: !!s.minimize_after_notification_submit,
         jira_connections: encryptConnectionTokens(jiraConnections),
         jira_active_connection_id: (0, jira_client_1.normalizeActiveJiraConnectionId)(jiraConnections, s.jira_active_connection_id ?? prev?.jira_active_connection_id),
         jira_log_on_afstem: !!s.jira_log_on_afstem,
@@ -282,7 +262,6 @@ function saveSettings(s) {
         window_mode: s.window_mode === 'detached' || s.window_mode === 'docked' ? s.window_mode : (prev?.window_mode ?? 'docked'),
         detached_bounds: s.detached_bounds !== undefined ? s.detached_bounds : (prev?.detached_bounds ?? null),
         dock_center_ratio: typeof s.dock_center_ratio === 'number' ? s.dock_center_ratio : (prev?.dock_center_ratio ?? 0.5),
-        island_os_notifications: s.island_os_notifications !== undefined ? !!s.island_os_notifications : !!prev?.island_os_notifications,
         flex_enabled: s.flex_enabled !== undefined ? !!s.flex_enabled : (prev?.flex_enabled ?? DEFAULT_SETTINGS.flex_enabled),
         flex_start_date: s.flex_start_date === undefined
             ? (prev?.flex_start_date ?? '')

@@ -1,8 +1,8 @@
-import { Component, inject, ChangeDetectionStrategy, effect, signal, computed, OnDestroy } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, effect, signal, computed, OnDestroy, afterNextRender, Injector, DOCUMENT } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
-import { IpcService, JiraConnection, JiraDeployment, JiraIdentityResult } from '../../services/ipc.service';
+import { IpcService, JiraConnection, JiraIdentityResult } from '../../services/ipc.service';
 import { FormArray, FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { isJiraConnectionUsable } from '../shared/jira-afstem.util';
 import {
@@ -20,29 +20,28 @@ import {
 type JiraConnectionForm = FormGroup<{
   id: FormControl<string>;
   name: FormControl<string>;
-  type: FormControl<JiraDeployment>;
   base_url: FormControl<string>;
   project_key: FormControl<string>;
   token: FormControl<string>;
-  email: FormControl<string>;
 }>;
-
-const DEFAULT_ONPREM_JIRA_URL = 'https://app-jira.corp.jyskebank.net/jira';
 
 function jiraConnectionsSnapshot(list: unknown): string {
   const rows = Array.isArray(list) ? list as Array<Partial<JiraConnection>> : [];
-  return JSON.stringify(rows.map((c) => {
-    const type = c?.type === 'cloud' ? 'cloud' : 'server';
-    return [
-      String(c?.id ?? ''),
-      String(c?.name ?? '').trim(),
-      type,
-      String(c?.base_url ?? '').trim().replace(/\/+$/, ''),
-      String(c?.project_key ?? '').trim().toUpperCase(),
-      String(c?.token ?? '').trim(),
-      type === 'cloud' ? String(c?.email ?? '').trim() : ''
-    ];
-  }));
+  return JSON.stringify(rows.map((c) => [
+    String(c?.id ?? ''),
+    String(c?.name ?? '').trim(),
+    String(c?.base_url ?? '').trim().replace(/\/+$/, ''),
+    String(c?.project_key ?? '').trim().toUpperCase(),
+    String(c?.token ?? '').trim()
+  ]));
+}
+
+function siteOrigin(url: string): string {
+  try {
+    return new URL(url.trim()).origin;
+  } catch {
+    return '';
+  }
 }
 
 @Component({
@@ -61,6 +60,8 @@ export class SettingsComponent {
   ipc = inject(IpcService);
   theme = inject(ThemeService);
   private fb = inject(FormBuilder);
+  private injector = inject(Injector);
+  private document = inject(DOCUMENT);
 
   private readonly weekdayControlNames = [
     'weekday_0',
@@ -88,13 +89,8 @@ export class SettingsComponent {
     azure_client_id: '',
     jira_active_connection_id: '',
     jira_connections: new FormArray<JiraConnectionForm>([]),
-    auto_focus_on_slot: false,
-    notification_silent: true,
     stale_threshold_minutes: 45,
     auto_start_on_login: false,
-    group_notifications: true,
-    minimize_after_notification_submit: false,
-    island_os_notifications: false,
     jira_log_on_afstem: false,
     flex_enabled: true,
     flex_start_date: '',
@@ -121,6 +117,7 @@ export class SettingsComponent {
   authError = signal<string>('');
   authStatus = this.ipc.authStatus;
   jiraVerifyBusyIds = signal<ReadonlySet<string>>(new Set());
+  jiraLoginBusyId = signal<string | null>(null);
   jiraVerifyResults = signal<Readonly<Record<string, JiraIdentityResult>>>({});
   private autoJiraVerifyAttempted = false;
   saveToast = signal<{ message: string; kind: 'success' | 'error' } | null>(null);
@@ -178,13 +175,8 @@ export class SettingsComponent {
         ((s.azure_client_id ?? '') !== (v.azure_client_id ?? '')) ||
         ((s.jira_active_connection_id ?? '') !== (v.jira_active_connection_id ?? '')) ||
         (jiraConnectionsSnapshot(s.jira_connections) !== jiraConnectionsSnapshot(v.jira_connections)) ||
-        (!!s.auto_focus_on_slot !== !!v.auto_focus_on_slot) ||
-        (!!s.notification_silent !== !!v.notification_silent) ||
         (Number(s.stale_threshold_minutes) !== Number(v.stale_threshold_minutes)) ||
         (!!s.auto_start_on_login !== !!v.auto_start_on_login) ||
-          (!!s.group_notifications !== !!v.group_notifications) ||
-          (!!s.minimize_after_notification_submit !== !!v.minimize_after_notification_submit) ||
-          (!!s.island_os_notifications !== !!v.island_os_notifications) ||
           (!!s.jira_log_on_afstem !== !!v.jira_log_on_afstem) ||
           ((s.flex_enabled !== false) !== !!v.flex_enabled) ||
           ((s.flex_start_date ?? '') !== (v.flex_start_date ?? '')) ||
@@ -232,13 +224,8 @@ export class SettingsComponent {
       azure_tenant_id: s.azure_tenant_id ?? '',
       azure_client_id: s.azure_client_id ?? '',
       jira_active_connection_id: s.jira_active_connection_id ?? '',
-      auto_focus_on_slot: !!s.auto_focus_on_slot,
-      notification_silent: !!s.notification_silent,
       stale_threshold_minutes: Number(s.stale_threshold_minutes) || 45,
       auto_start_on_login: !!s.auto_start_on_login,
-      group_notifications: !!s.group_notifications,
-      minimize_after_notification_submit: !!s.minimize_after_notification_submit,
-      island_os_notifications: !!s.island_os_notifications,
       jira_log_on_afstem: !!s.jira_log_on_afstem,
       flex_enabled: s.flex_enabled !== false,
       flex_start_date: s.flex_start_date ?? '',
@@ -261,20 +248,13 @@ export class SettingsComponent {
       jira_connections: raw.jira_connections.map((c) => ({
         id: c.id,
         name: c.name.trim(),
-        type: c.type,
         base_url: c.base_url.trim(),
         project_key: c.project_key.trim().toUpperCase(),
-        token: c.token.trim(),
-        email: c.type === 'cloud' ? c.email.trim() : ''
+        token: c.token.trim()
       })),
       jira_active_connection_id: raw.jira_active_connection_id,
-      auto_focus_on_slot: raw.auto_focus_on_slot,
-      notification_silent: raw.notification_silent,
       stale_threshold_minutes: Number(raw.stale_threshold_minutes),
       auto_start_on_login: raw.auto_start_on_login,
-      group_notifications: raw.group_notifications,
-      minimize_after_notification_submit: raw.minimize_after_notification_submit,
-      island_os_notifications: raw.island_os_notifications,
       jira_log_on_afstem: raw.jira_log_on_afstem,
       flex_enabled: raw.flex_enabled,
       flex_start_date: raw.flex_start_date,
@@ -439,23 +419,28 @@ export class SettingsComponent {
   clearImport() { this.importText.set(''); this.importResult.set(null); }
 
   private createJiraConnectionGroup(c: Partial<JiraConnection> = {}): JiraConnectionForm {
-    return this.fb.nonNullable.group({
+    const group = this.fb.nonNullable.group({
       id: c.id || crypto.randomUUID(),
       name: c.name ?? '',
-      type: (c.type === 'cloud' ? 'cloud' : 'server') as JiraDeployment,
       base_url: c.base_url ?? '',
       project_key: c.project_key ?? '',
-      token: c.token ?? '',
-      email: c.email ?? ''
+      token: c.token ?? ''
     });
+    // The session cookie belongs to one Atlassian site; never send it to another one.
+    let origin = siteOrigin(group.controls.base_url.value);
+    group.controls.base_url.valueChanges.subscribe((url) => {
+      const next = siteOrigin(url);
+      if (next === origin) return;
+      origin = next;
+      group.controls.token.setValue('');
+    });
+    return group;
   }
 
-  addJiraConnection(type: JiraDeployment) {
+  addJiraConnection() {
     const existing = this.jiraConnections.getRawValue();
     const group = this.createJiraConnectionGroup({
-      type,
-      name: type === 'cloud' ? 'Jira Cloud' : 'Jira On-Premise',
-      base_url: type === 'server' ? DEFAULT_ONPREM_JIRA_URL : '',
+      name: 'Jira Cloud',
       project_key: existing[0]?.project_key ?? ''
     });
     this.jiraConnections.push(group);
@@ -464,17 +449,50 @@ export class SettingsComponent {
     }
   }
 
-  removeJiraConnection(index: number) {
+  removeJiraConnection(index: number, fallbackFocus?: HTMLElement) {
     const removedId = this.jiraConnections.at(index)?.controls.id.value;
     this.jiraConnections.removeAt(index);
     const activeCtrl = this.settingsForm.controls.jira_active_connection_id;
     if (activeCtrl.value === removedId) {
       activeCtrl.setValue(this.jiraConnections.at(0)?.controls.id.value ?? '');
     }
+    // The focused Fjern button is gone; move focus to the neighbouring connection or the add button.
+    const neighbour = this.jiraConnections.at(Math.min(index, this.jiraConnections.length - 1));
+    const neighbourId = neighbour?.controls.id.value;
+    afterNextRender(() => {
+      const target = neighbourId ? this.document.getElementById(`jira-remove-${neighbourId}`) : null;
+      (target ?? fallbackFocus)?.focus();
+    }, { injector: this.injector });
   }
 
   isJiraVerifyBusy(id: string): boolean {
     return this.jiraVerifyBusyIds().has(id);
+  }
+
+  isJiraLoginBusy(id: string): boolean {
+    return this.jiraLoginBusyId() === id;
+  }
+
+  /** Opens an interactive Atlassian login and stores the captured session cookie as the connection token. */
+  async loginJiraViaBrowser(id: string, trigger?: HTMLElement) {
+    const group = this.jiraConnections.controls.find((g) => g.controls.id.value === id);
+    if (!group || this.jiraLoginBusyId()) return;
+    this.jiraLoginBusyId.set(id);
+    this.jiraVerifyResults.update(({ [id]: _removed, ...rest }) => rest);
+    try {
+      const result = await this.ipc.loginJiraViaBrowser(group.controls.base_url.value.trim());
+      if (!result.ok || !result.token) {
+        this.setJiraVerifyResult(id, { ok: false, error: result.error || 'Jira-login fejlede.' });
+        return;
+      }
+      group.controls.token.setValue(result.token);
+      group.markAsDirty();
+      await this.verifyJiraConnection(id);
+    } finally {
+      this.jiraLoginBusyId.set(null);
+      // The external login window took focus; bring it back to where the user started.
+      trigger?.focus();
+    }
   }
 
   private verifyAllJiraConnections() {
@@ -487,8 +505,7 @@ export class SettingsComponent {
     const connection = this.jiraConnections.getRawValue().find((c) => c.id === id);
     if (!connection) return;
     if (!isJiraConnectionUsable(connection)) {
-      const missing = connection.type === 'cloud' ? 'URL, email og API token' : 'URL og PSA key';
-      this.setJiraVerifyResult(id, { ok: false, error: `Udfyld ${missing}.` });
+      this.setJiraVerifyResult(id, { ok: false, error: 'Udfyld URL og log ind via browser.' });
       return;
     }
 

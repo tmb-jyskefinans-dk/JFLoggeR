@@ -30,7 +30,8 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     jiraGetLoggedWorklogs: (day) => electron_1.ipcRenderer.invoke('jira:get-logged-worklogs', { day }),
     jiraUnsetAfstemt: (day) => electron_1.ipcRenderer.invoke('jira:unset-afstemt', { day }),
     jiraVerifyIdentity: (payload) => electron_1.ipcRenderer.invoke('jira:verify-identity', payload ?? {}),
-    // Events from main (notifications clicked)
+    jiraBrowserLogin: (baseUrl) => electron_1.ipcRenderer.invoke('jira:browser-login', { base_url: baseUrl }),
+    // Events from main (interval reminders, tray actions)
     onPrompt: (cb) => {
         const handler = (_e, d) => cb(d);
         electron_1.ipcRenderer.on('prompt:open', handler);
@@ -68,8 +69,6 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
         electron_1.ipcRenderer.on('dialog:open-log-all', handler);
         return () => electron_1.ipcRenderer.removeListener('dialog:open-log-all', handler);
     },
-    // Debug notification trigger
-    sendTestNotification: (body) => electron_1.ipcRenderer.invoke('debug:notify', { body }),
     // Window controls
     minimizeWindow: () => electron_1.ipcRenderer.invoke('window:minimize'),
     toggleMaximizeWindow: () => electron_1.ipcRenderer.invoke('window:toggle-maximize'),

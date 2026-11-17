@@ -109,11 +109,6 @@ If Electron does not auto-reload:
 - Ensure the compiled output folder `electron/.dist` exists and contains `main.js`.
 - Verify `watch:electron` script still includes `--watch electron/.dist`.
 
-If notifications don't appear on Windows:
-
-- Ensure `app.setAppUserModelId(...)` matches a stable identifier (already set in `main.ts`).
-- Test with `ipcMain.handle('debug:notify', ...)` via a renderer IPC call.
-
 ## Script Overview
 
 | Script | Purpose |
@@ -133,6 +128,16 @@ If notifications don't appear on Windows:
 ## Notes
 
 The Electron entry point is defined as `electron/main.js` (compiled from `electron/main.ts`). The production renderer assets resolve to `dist/work-logger/browser/index.html` which the main process loads when `VITE_DEV_SERVER_URL` is not set.
+
+### Interval reminders
+
+The app shows no operating system notifications or popups. The only reminder is the dynamic island, the small always-on-top bar docked to the edge of the screen:
+
+- When an interval ends unlogged, the docked island pulses and gets keyboard focus. Press Enter to log the interval with the same description and category as the previous one.
+- If the island is hidden or the window is minimized, the app docks the island again and shows it.
+- If the full window is open, it comes to the front with the log dialog open and the Submit button focused. For 600 milliseconds after the dialog opens, Enter is ignored so that a key press meant for another app does not save anything.
+- If an interval stays unlogged longer than the "Stale interval tærskel (minutter)" setting (stale interval threshold, in minutes), the island pulses again.
+- App updates download in the background and install on the next restart.
 
 ### Deleting a logged interval
 ### Missing interval placeholders
