@@ -4,11 +4,6 @@ export interface JiraAfstemSummaryRow {
   minutes: number;
 }
 
-const JIRA_AFSTEM_CATEGORIES = new Set([
-  'Udvikling (prioriterede jf. projektoversigten)',
-  'Estimering'
-]);
-
 const JIRA_KEY_PREFIX = /^[A-Z]+-\d+\s*-\s*/;
 
 type JiraConnectionLike = { id?: unknown; name?: unknown; base_url?: unknown; token?: unknown };
@@ -33,9 +28,7 @@ export function shouldJiraAutoLogOnAfstem(settings: unknown): boolean {
 
 export function isJiraAfstemRow(row: { description?: string; category?: string } | null | undefined): boolean {
   if (!row) return false;
-  const category = String(row.category ?? '');
-  const description = String(row.description ?? '');
-  return JIRA_AFSTEM_CATEGORIES.has(category) && JIRA_KEY_PREFIX.test(description);
+  return JIRA_KEY_PREFIX.test(String(row.description ?? ''));
 }
 
 export function getJiraAfstemRows<T extends { description?: string; category?: string }>(rows: T[]): T[] {

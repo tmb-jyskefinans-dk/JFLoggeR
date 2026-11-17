@@ -12,10 +12,10 @@ describe('jira-afstem.util', () => {
     expect(isJiraConnectionUsable({ ...loggedIn, base_url: '' })).toBe(true);
   });
 
-  test('matches only Jira-key rows in allowed categories', () => {
+  test('matches Jira-key rows in any category', () => {
     expect(isJiraAfstemRow({ category: 'Udvikling (prioriterede jf. projektoversigten)', description: 'ABC-123 - Fix bug' })).toBe(true);
     expect(isJiraAfstemRow({ category: 'Udvikling (prioriterede jf. projektoversigten)', description: 'No jira key' })).toBe(false);
-    expect(isJiraAfstemRow({ category: 'Møde', description: 'ABC-123 - Fix bug' })).toBe(false);
+    expect(isJiraAfstemRow({ category: 'Møde', description: 'ABC-123 - Fix bug' })).toBe(true);
   });
 
   test('filters rows consistently for shared afstem behavior', () => {
@@ -26,7 +26,6 @@ describe('jira-afstem.util', () => {
       { category: 'Møde', description: 'XYZ-1 - C', minutes: 20 }
     ];
     const eligible = getJiraAfstemRows(rows);
-    expect(eligible.length).toBe(2);
-    expect(eligible.map(r => r.description)).toEqual(['ABC-123 - A', 'DEF-42 - B']);
+    expect(eligible.map(r => r.description)).toEqual(['ABC-123 - A', 'DEF-42 - B', 'XYZ-1 - C']);
   });
 });

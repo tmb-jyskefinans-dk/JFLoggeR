@@ -817,12 +817,6 @@ ipcMain.handle('jira:browser-login', async (_e, payload?: { base_url?: unknown }
   }
 });
 
-// Categories in 'Udvikling Projekter' group that support Jira worklog posting
-const JIRA_WORKLOG_CATEGORIES = new Set([
-  'Udvikling (prioriterede jf. projektoversigten)',
-  'Estimering'
-]);
-
 ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
   try {
     const day = String(payload?.day ?? '').trim();
@@ -832,7 +826,7 @@ ipcMain.handle('jira:log-worklog', async (_e, payload: { day: string }) => {
     const missing = jiraConnectionMissingConfig(connection);
     if (missing || !connection) return { ok: false, error: missing ?? 'Jira er ikke konfigureret.' };
 
-    const entries = getDayEntries(day).filter((e: any) => JIRA_WORKLOG_CATEGORIES.has(e.category));
+    const entries = getDayEntries(day);
     if (!entries.length) return { ok: true, results: [] };
 
     // Aggregate seconds + earliest start per Jira key
