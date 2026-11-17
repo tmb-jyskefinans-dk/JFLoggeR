@@ -2,7 +2,7 @@
 export type JiraConnection = {
   id: string;
   name: string;
-  base_url: string;     // https://<site>.atlassian.net
+  base_url: string;     // https://<site>.atlassian.net (blank falls back to DEFAULT_JIRA_BASE_URL)
   project_key: string;
   token: string;        // value of the tenant.session.token cookie
 };
@@ -13,9 +13,11 @@ export const JIRA_CLOUD_SESSION_COOKIE = 'tenant.session.token';
 /** Connection id used by worklogs tracked before multiple connections existed (always on-prem, now removed). */
 export const LEGACY_ONPREM_CONNECTION_ID = 'onprem';
 
+/** Used when no Jira URL is entered. */
+export const DEFAULT_JIRA_BASE_URL = 'https://jyskebank.atlassian.net';
+
 export function normalizeJiraBaseUrl(raw: unknown): string {
-  const value = String(raw ?? '').trim();
-  if (!value) return '';
+  const value = String(raw ?? '').trim() || DEFAULT_JIRA_BASE_URL;
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:') return '';

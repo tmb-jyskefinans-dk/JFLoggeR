@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LEGACY_ONPREM_CONNECTION_ID = exports.JIRA_CLOUD_SESSION_COOKIE = void 0;
+exports.DEFAULT_JIRA_BASE_URL = exports.LEGACY_ONPREM_CONNECTION_ID = exports.JIRA_CLOUD_SESSION_COOKIE = void 0;
 exports.normalizeJiraBaseUrl = normalizeJiraBaseUrl;
 exports.normalizeJiraConnection = normalizeJiraConnection;
 exports.normalizeJiraConnections = normalizeJiraConnections;
@@ -22,10 +22,10 @@ exports.jiraUserIdFromMyself = jiraUserIdFromMyself;
 exports.JIRA_CLOUD_SESSION_COOKIE = 'tenant.session.token';
 /** Connection id used by worklogs tracked before multiple connections existed (always on-prem, now removed). */
 exports.LEGACY_ONPREM_CONNECTION_ID = 'onprem';
+/** Used when no Jira URL is entered. */
+exports.DEFAULT_JIRA_BASE_URL = 'https://jyskebank.atlassian.net';
 function normalizeJiraBaseUrl(raw) {
-    const value = String(raw ?? '').trim();
-    if (!value)
-        return '';
+    const value = String(raw ?? '').trim() || exports.DEFAULT_JIRA_BASE_URL;
     try {
         const url = new URL(value);
         if (url.protocol !== 'https:')

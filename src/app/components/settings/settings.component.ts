@@ -2,7 +2,7 @@ import { Component, inject, ChangeDetectionStrategy, effect, signal, computed, O
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ThemeService } from '../../services/theme.service';
 import { DecimalPipe } from '@angular/common';
-import { IpcService, JiraConnection, JiraIdentityResult } from '../../services/ipc.service';
+import { DEFAULT_JIRA_BASE_URL, IpcService, JiraConnection, JiraIdentityResult } from '../../services/ipc.service';
 import { FormArray, FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { isJiraConnectionUsable } from '../shared/jira-afstem.util';
 import {
@@ -30,7 +30,7 @@ function jiraConnectionsSnapshot(list: unknown): string {
   return JSON.stringify(rows.map((c) => [
     String(c?.id ?? ''),
     String(c?.name ?? '').trim(),
-    String(c?.base_url ?? '').trim().replace(/\/+$/, ''),
+    String(c?.base_url ?? '').trim().replace(/\/+$/, '') || DEFAULT_JIRA_BASE_URL,
     String(c?.project_key ?? '').trim().toUpperCase(),
     String(c?.token ?? '').trim()
   ]));
@@ -38,7 +38,7 @@ function jiraConnectionsSnapshot(list: unknown): string {
 
 function siteOrigin(url: string): string {
   try {
-    return new URL(url.trim()).origin;
+    return new URL(url.trim() || DEFAULT_JIRA_BASE_URL).origin;
   } catch {
     return '';
   }
@@ -441,6 +441,7 @@ export class SettingsComponent {
     const existing = this.jiraConnections.getRawValue();
     const group = this.createJiraConnectionGroup({
       name: 'Jira Cloud',
+      base_url: DEFAULT_JIRA_BASE_URL,
       project_key: existing[0]?.project_key ?? ''
     });
     this.jiraConnections.push(group);
@@ -505,7 +506,7 @@ export class SettingsComponent {
     const connection = this.jiraConnections.getRawValue().find((c) => c.id === id);
     if (!connection) return;
     if (!isJiraConnectionUsable(connection)) {
-      this.setJiraVerifyResult(id, { ok: false, error: 'Udfyld URL og log ind via browser.' });
+      this.setJiraVerifyResult(id, { ok: false, error: 'Log ind via browser først.' });
       return;
     }
 

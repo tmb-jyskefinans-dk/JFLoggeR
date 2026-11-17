@@ -2,6 +2,7 @@ import {
   buildJiraSearchUrl,
   buildJiraWorklogBody,
   buildJiraWorklogUrl,
+  DEFAULT_JIRA_BASE_URL,
   describeJiraHttpError,
   jiraAuthHeaders,
   jiraBrowserLoginOrigin,
@@ -27,6 +28,8 @@ describe('jira-client', () => {
     const c = normalizeJiraConnection({ id: 'x', base_url: 'https://firma.atlassian.net/', project_key: 'abc', email: 'a@b.dk' });
     expect(c).toEqual({ id: 'x', name: 'Jira Cloud', base_url: 'https://firma.atlassian.net', project_key: 'ABC', token: '' });
     expect(normalizeJiraConnection({ id: 'y', base_url: 'http://insecure' })?.base_url).toBe('');
+    expect(normalizeJiraConnection({ id: 'z', base_url: '  ' })?.base_url).toBe(DEFAULT_JIRA_BASE_URL);
+    expect(normalizeJiraConnection({ id: 'w' })?.base_url).toBe(DEFAULT_JIRA_BASE_URL);
     expect(normalizeJiraConnection({ name: 'no id' })).toBeNull();
     expect(normalizeJiraConnections([{ id: 'a' }, { id: 'a' }, null]).length).toBe(1);
   });
@@ -98,6 +101,6 @@ describe('jira-client', () => {
     expect(jiraBrowserLoginOrigin('https://firma.atlassian.net/')).toBe('https://firma.atlassian.net');
     expect(jiraBrowserLoginOrigin('https://api.atlassian.com/ex/jira/abc')).toBeNull();
     expect(jiraBrowserLoginOrigin('http://firma.atlassian.net')).toBeNull();
-    expect(jiraBrowserLoginOrigin('')).toBeNull();
+    expect(jiraBrowserLoginOrigin('')).toBe(DEFAULT_JIRA_BASE_URL);
   });
 });

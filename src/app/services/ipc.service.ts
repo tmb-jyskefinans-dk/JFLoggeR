@@ -67,6 +67,9 @@ export interface JiraIdentityResult {
   error?: string;
 }
 
+/** Used when no Jira URL is entered; mirrors DEFAULT_JIRA_BASE_URL in electron/jira-client.ts. */
+export const DEFAULT_JIRA_BASE_URL = 'https://jyskebank.atlassian.net';
+
 /** A Jira Cloud site authenticated with a session cookie captured via browser login. */
 export interface JiraConnection {
   id: string;

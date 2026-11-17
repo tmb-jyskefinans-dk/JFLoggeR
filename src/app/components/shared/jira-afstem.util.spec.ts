@@ -9,7 +9,7 @@ describe('jira-afstem.util', () => {
     expect(shouldJiraAutoLogOnAfstem(settings('a', false))).toBe(false);
     expect(shouldJiraAutoLogOnAfstem(settings('b'))).toBe(false);
     expect(shouldJiraAutoLogOnAfstem(settings('missing'))).toBe(false);
-    expect(isJiraConnectionUsable({ ...loggedIn, base_url: '' })).toBe(false);
+    expect(isJiraConnectionUsable({ ...loggedIn, base_url: '' })).toBe(true);
   });
 
   test('matches only Jira-key rows in allowed categories', () => {

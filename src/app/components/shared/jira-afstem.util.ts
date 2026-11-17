@@ -22,7 +22,8 @@ export function getActiveJiraConnection(settings: unknown): JiraConnectionLike |
 
 export function isJiraConnectionUsable(c: JiraConnectionLike | null | undefined): boolean {
   if (!c) return false;
-  return !!String(c.base_url ?? '').trim() && !!String(c.token ?? '').trim();
+  // A blank URL falls back to the default Jira Cloud site, so only the browser login is required.
+  return !!String(c.token ?? '').trim();
 }
 
 export function shouldJiraAutoLogOnAfstem(settings: unknown): boolean {
