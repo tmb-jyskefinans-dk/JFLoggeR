@@ -1,8 +1,9 @@
 {
   "name": "work-logger",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "Work Logger desktop app for tracking daily work activities",
   "author": "tmb-jyskefinans-dk",
+  "repository": "github:tmb-jyskefinans-dk/JFLoggeR",
   "main": "electron/.dist/main.js",
   "private": true,
   "scripts": {
@@ -60,7 +61,6 @@
     "@angular/router": "^20.3.19",
     "@azure/msal-node": "^5.1.2",
     "electron-squirrel-startup": "^1.0.1",
-    "electron-updater": "^6.8.11",
     "lowdb": "^7.0.1",
     "postcss": "^8.5.10",
     "rxjs": "~7.8.2",

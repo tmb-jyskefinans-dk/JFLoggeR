@@ -146,6 +146,7 @@ const time_1 = require("./time");
 const coverage_1 = require("./coverage");
 const jira_search_1 = require("./jira-search");
 const jira_client_1 = require("./jira-client");
+const auto_update_1 = require("./auto-update");
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
 try {
@@ -155,38 +156,6 @@ try {
     }
 }
 catch { /* ignore if module missing in dev */ }
-// Auto-update (GitHub releases). Only initialize when the app is packaged.
-// In dev (ts outDir .dist) update-electron-app tries to read a package.json next to main.js (electron/.dist/package.json)
-// which does not exist, causing ENOENT. Guard with app.isPackaged.
-try {
-    if (electron_1.app.isPackaged) {
-        // Initialize simplified auto-update helper (GitHub releases).
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require('update-electron-app')({
-        // updateInterval: '1 hour', // uncomment to poll periodically
-        });
-        // Updates are installed silently on next restart; events are only logged.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { autoUpdater } = require('electron-updater');
-        autoUpdater.on('checking-for-update', () => console.log('[update] checking for update...'));
-        autoUpdater.on('update-available', (info) => console.log('[update] update available', info?.version));
-        autoUpdater.on('update-not-available', () => console.log('[update] no update available'));
-        autoUpdater.on('error', (err) => console.warn('[update] error', err));
-        autoUpdater.on('download-progress', (p) => {
-            try {
-                console.log('[update] download progress', Math.round(p.percent) + '%');
-            }
-            catch { }
-        });
-        autoUpdater.on('update-downloaded', (info) => console.log('[update] downloaded', info?.version));
-    }
-    else {
-        console.log('[main] skipping auto-update init (development environment)');
-    }
-}
-catch (e) {
-    console.warn('[main] auto-update init failed', e);
-}
 let win = null;
 let tray = null;
 const pending = new Set(); // slot keys 'YYYY-MM-DDTHH:MM'
@@ -1276,6 +1245,8 @@ electron_1.app.whenReady().then(() => {
     (0, db_1.initDb)();
     console.log('[main] creating main window...');
     createWindow();
+    // Auto-update from GitHub releases via update.electronjs.org; failures are logged, never fatal.
+    (0, auto_update_1.startAutoUpdate)({ isPackaged: electron_1.app.isPackaged, argv: process.argv, log: writeLog });
     // Create tray icon
     try {
         const iconPath = node_path_1.default.join(__dirname, 'icon.png');

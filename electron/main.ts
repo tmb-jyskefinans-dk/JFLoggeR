@@ -205,6 +205,7 @@ import {
   normalizeJiraConnection,
   resolveJiraConnection
 } from './jira-client';
+import { startAutoUpdate } from './auto-update';
 
 // Handle Squirrel.Windows install/update events early so shortcuts get created.
 // electron-squirrel-startup returns true if we are running a Squirrel event (install, update, uninstall)
@@ -214,34 +215,6 @@ try {
     app.quit();
   }
 } catch { /* ignore if module missing in dev */ }
-
-// Auto-update (GitHub releases). Only initialize when the app is packaged.
-// In dev (ts outDir .dist) update-electron-app tries to read a package.json next to main.js (electron/.dist/package.json)
-// which does not exist, causing ENOENT. Guard with app.isPackaged.
-try {
-  if (app.isPackaged) {
-    // Initialize simplified auto-update helper (GitHub releases).
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    require('update-electron-app')({
-      // updateInterval: '1 hour', // uncomment to poll periodically
-    });
-    // Updates are installed silently on next restart; events are only logged.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { autoUpdater } = require('electron-updater');
-    autoUpdater.on('checking-for-update', () => console.log('[update] checking for update...'));
-    autoUpdater.on('update-available', (info: any) => console.log('[update] update available', info?.version));
-    autoUpdater.on('update-not-available', () => console.log('[update] no update available'));
-    autoUpdater.on('error', (err: any) => console.warn('[update] error', err));
-    autoUpdater.on('download-progress', (p: any) => {
-      try { console.log('[update] download progress', Math.round(p.percent) + '%'); } catch { }
-    });
-    autoUpdater.on('update-downloaded', (info: any) => console.log('[update] downloaded', info?.version));
-  } else {
-    console.log('[main] skipping auto-update init (development environment)');
-  }
-} catch (e) {
-  console.warn('[main] auto-update init failed', e);
-}
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -1226,6 +1199,8 @@ app.whenReady().then(() => {
   initDb();
   console.log('[main] creating main window...');
   createWindow();
+  // Auto-update from GitHub releases via update.electronjs.org; failures are logged, never fatal.
+  startAutoUpdate({ isPackaged: app.isPackaged, argv: process.argv, log: writeLog });
   // Create tray icon
   try {
     const iconPath = path.join(__dirname, 'icon.png');
