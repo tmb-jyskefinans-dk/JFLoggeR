@@ -1,4 +1,4 @@
-import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, untracked, OnDestroy } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, signal, computed, effect, untracked, OnDestroy, Injector, afterNextRender } from '@angular/core';
 import { getCategoryColor } from '../../models/category-colors';
 import { CATEGORY_GROUPS } from '../../models/categories';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -10,12 +10,12 @@ import { SnackbarService } from '../../services/snackbar.service';
 import {
   categoryTotals,
   formatDuration,
-  groupDayBlocks,
   missingRowsForDay,
   plannedMinutesForDay,
   isoWeek,
   shiftYmd,
   splitJiraKey,
+  toDayBlocks,
   type DayBlock,
   type DayRowLike
 } from './day-blocks.util';
@@ -125,6 +125,71 @@ export class DayViewComponent implements OnDestroy {
       }
     }
   }
+  // Description edit state (start of the interval being edited)
+  editingDescStart = signal<string | null>(null);
+  descDraft = signal('');
+  descError = signal('');
+  private injector = inject(Injector);
+
+  beginEditDescription(block: DayRow) {
+    if (!block || block.kind !== 'entry' || this.dayLocked()) return;
+    this.editingKey.set(null);
+    this.editingDescStart.set(block.start);
+    this.descDraft.set(block.description);
+    this.descError.set('');
+    afterNextRender(() => {
+      const input = document.getElementById(this.descInputId(block)) as HTMLInputElement | null;
+      input?.focus();
+      input?.select();
+    }, { injector: this.injector });
+  }
+  isEditingDescription(block: DayRow) { return block.kind === 'entry' && this.editingDescStart() === block.start; }
+  descInputId(block: DayRow) { return `desc-edit-${block.start.replace(':', '')}`; }
+
+  cancelEditDescription(block: DayRow) {
+    if (!this.isEditingDescription(block)) return;
+    this.editingDescStart.set(null);
+    this.descError.set('');
+    this.focusDescEditButton(block);
+  }
+
+  async saveDescription(block: DayRow) {
+    if (!this.isEditingDescription(block) || this.dayLocked()) return;
+    const description = this.descDraft().trim();
+    if (!description) {
+      this.descError.set('Beskrivelsen må ikke være tom.');
+      return;
+    }
+    this.editingDescStart.set(null);
+    this.descError.set('');
+    if (description !== block.description) {
+      const day = this.day();
+      const entries = block.rows.map(r => ({ day, start: r.start, end: r.end, description, category: r.category }));
+      try {
+        await window.workApi.saveEntries(entries);
+        this.snackbar.show('Beskrivelse opdateret.');
+      } catch {
+        this.snackbar.show('Kunne ikke ændre beskrivelse.');
+      }
+      await this.ipc.loadDay(day);
+      this.ipc.loadRecent();
+    }
+    this.focusDescEditButton(block);
+  }
+
+  /** Blur commits a valid change; an empty field is abandoned rather than trapping focus. */
+  onDescriptionBlur(block: DayRow) {
+    if (!this.isEditingDescription(block)) return;
+    if (!this.descDraft().trim()) this.cancelEditDescription(block);
+    else void this.saveDescription(block);
+  }
+
+  private focusDescEditButton(block: DayRow) {
+    afterNextRender(() => {
+      (document.querySelector(`[data-desc-edit="${block.start}"]`) as HTMLElement | null)?.focus();
+    }, { injector: this.injector });
+  }
+
   cancelEdit() { this.editingKey.set(null); }
   isEditing(block: DayRow) { return !!block && block.kind === 'entry' && this.editingKey() === block.start; }
   async applyCategory(block: DayRow, cat: string) {
@@ -172,7 +237,7 @@ export class DayViewComponent implements OnDestroy {
     return [...starts].map(start => `${day}T${start}`);
   });
 
-  blocks = computed<DayRow[]>(() => groupDayBlocks(this.rows())
+  blocks = computed<DayRow[]>(() => toDayBlocks(this.rows())
     .map(b => {
       const { key, text } = splitJiraKey(b.description);
       return { ...b, jiraKey: key, text, color: b.kind === 'entry' ? getCategoryColor(b.category) : '', durationLabel: formatDuration(b.minutes) };
@@ -357,7 +422,10 @@ export class DayViewComponent implements OnDestroy {
 
   private resetDeleteOnDayChange = effect(() => {
     this.day();
-    untracked(() => this.resetDeleteConfirm());
+    untracked(() => {
+      this.resetDeleteConfirm();
+      this.editingDescStart.set(null);
+    });
   });
 
   // Today's planned time grows every minute, so keep the balance current while the view is open.
@@ -451,9 +519,6 @@ export class DayViewComponent implements OnDestroy {
   private openLogDialogFor(slots: string[]) {
     if (this.dayLocked() || !slots.length) return;
     const sorted = [...slots].sort();
-    const currentPending = new Set(this.ipc.pendingSlots());
-    for (const s of sorted) currentPending.add(s);
-    this.ipc.pendingSlots.set(Array.from(currentPending).sort());
     this.ipc.preselectedSlots.set(sorted);
     window.dispatchEvent(new CustomEvent('open-log-dialog', { detail: { slots: sorted } }));
   }

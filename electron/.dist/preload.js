@@ -18,6 +18,7 @@ electron_1.contextBridge.exposeInMainWorld('workApi', {
     setExternalLogged: (day, exported) => electron_1.ipcRenderer.invoke('db:set-external-logged', day, exported),
     importExternal: (raw) => electron_1.ipcRenderer.invoke('db:import-external', raw),
     getFlexBalance: () => electron_1.ipcRenderer.invoke('stats:flex-balance'),
+    getAppVersion: () => electron_1.ipcRenderer.invoke('app:get-version'),
     // Backlog queue
     getPendingSlots: () => electron_1.ipcRenderer.invoke('queue:get'),
     submitSlots: (payload) => electron_1.ipcRenderer.invoke('queue:submit', payload),

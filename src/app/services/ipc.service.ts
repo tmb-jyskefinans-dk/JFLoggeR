@@ -136,6 +136,7 @@ declare global {
       setExternalLogged?(day: string, exported: boolean): Promise<{ day: string; exported: boolean }>;
       importExternal?(raw: string): Promise<{ ok: boolean; imported?: number; skipped?: number; details?: { line: number; reason: string }[]; error?: string }>;
       getFlexBalance?(): Promise<FlexBalance>;
+      getAppVersion?(): Promise<string>;
       getAuthStatus?(): Promise<AuthStatus>;
       signInMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
       signOutMicrosoft?(): Promise<{ ok: boolean; error?: string; status?: AuthStatus }>;
@@ -336,6 +337,14 @@ export class IpcService {
         console.error('[ipc] saveSettings failed', err);
         throw err;
       });
+  }
+
+  getAppVersion(): Promise<string> {
+    return window.workApi.getAppVersion?.()
+      .catch((err) => {
+        console.error('[ipc] getAppVersion failed', err);
+        return '';
+      }) ?? Promise.resolve('');
   }
 
   loadAuthStatus() {

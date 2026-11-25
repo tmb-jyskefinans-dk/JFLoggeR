@@ -113,6 +113,7 @@ export class SettingsComponent {
   scheduleSets = computed(() => this.workSchedule().map(slots => new Set(slots)));
   importSlotMinutes = computed(() => effectiveSlotMinutes(this.ipc.settings()));
 
+  appVersion = signal<string>('');
   authBusy = signal<boolean>(false);
   authError = signal<string>('');
   authStatus = this.ipc.authStatus;
@@ -187,6 +188,7 @@ export class SettingsComponent {
     const s = this.ipc.settings();
   if (s) { this.apply(s); this.initialSettings.set(s); } else this.ipc.loadSettings();
     this.ipc.loadAuthStatus();
+    this.ipc.getAppVersion().then((v) => this.appVersion.set(v));
     // Apply the asynchronous initial load once. Later emissions must not overwrite local edits.
     effect(() => {
       const v = this.ipc.settings();

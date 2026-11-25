@@ -107,11 +107,29 @@
               <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ b.durationLabel }}</div>
             </div>
             <div class="min-w-0 flex-1">
-              <p class="text-sm leading-snug break-words text-slate-800 dark:text-slate-100">
-                @if (b.jiraKey) {
-                  <span class="mr-1.5 rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">{{ b.jiraKey }}</span>
-                }{{ b.text || 'Ingen beskrivelse' }}
-              </p>
+              @if (isEditingDescription(b)) {
+                <form (submit)="$event.preventDefault(); saveDescription(b)" class="flex flex-col gap-1">
+                  <label [for]="descInputId(b)" class="sr-only">Beskrivelse for {{ b.start }}–{{ b.end }}</label>
+                  <input [id]="descInputId(b)" type="text" name="description" required autocomplete="off"
+                    [value]="descDraft()" (input)="descDraft.set($any($event.target).value); descError.set('')"
+                    (keydown.escape)="$event.stopPropagation(); cancelEditDescription(b)" (blur)="onDescriptionBlur(b)"
+                    [attr.aria-invalid]="descError() ? 'true' : null"
+                    [attr.aria-describedby]="descInputId(b) + '-hint' + (descError() ? ' ' + descInputId(b) + '-error' : '')"
+                    class="w-full rounded-md border border-slate-400 bg-white px-2 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-500 dark:bg-slate-900 dark:text-slate-100" />
+                  <p [id]="descInputId(b) + '-hint'" class="text-[11px] text-slate-600 dark:text-slate-300">Enter gemmer, Esc annullerer.</p>
+                  @if (descError()) {
+                    <p [id]="descInputId(b) + '-error'" role="alert" class="text-[11px] font-medium text-rose-700 dark:text-rose-300">{{ descError() }}</p>
+                  }
+                </form>
+              } @else {
+                <p class="text-sm leading-snug break-words text-slate-800 dark:text-slate-100"
+                  [class.cursor-text]="!dayLocked()" (dblclick)="beginEditDescription(b)"
+                  [attr.title]="dayLocked() ? null : 'Dobbeltklik for at redigere beskrivelsen'">
+                  @if (b.jiraKey) {
+                    <span class="mr-1.5 rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">{{ b.jiraKey }}</span>
+                  }{{ b.text || 'Ingen beskrivelse' }}
+                </p>
+              }
               <button type="button" (click)="beginEdit(b, $event)" [disabled]="dayLocked()"
                 class="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-default disabled:hover:bg-transparent dark:text-slate-300 dark:hover:bg-slate-700"
                 [attr.aria-label]="'Skift kategori for ' + b.start + '–' + b.end + ' (' + b.category + ')'">
@@ -142,6 +160,12 @@
               }
             </div>
             @if (!dayLocked()) {
+              <button type="button" (click)="beginEditDescription(b)" class="day-block-action" [attr.data-desc-edit]="b.start"
+                title="Rediger beskrivelse" [attr.aria-label]="'Rediger beskrivelse for ' + b.start + '–' + b.end">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />
+                </svg>
+              </button>
               @if (confirmDeleteStart() === b.start) {
                 <button type="button" (click)="removeBlock(b)"
                   class="self-start shrink-0 inline-flex items-center rounded-full h-7 px-3 text-xs font-semibold bg-rose-600 text-white hover:bg-rose-500"

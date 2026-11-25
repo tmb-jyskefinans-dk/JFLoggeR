@@ -151,6 +151,52 @@ describe('LogDialogComponent', () => {
     expect(component.selectedSlots()).toEqual(['2026-05-19T12:30']);
   }));
 
+  it('keeps preselected missed slots selected and visible when the pending queue reloads without them', () => {
+    // Main only queued 12:00; 12:15 (missed) and 12:30 (running) come from the day view.
+    pendingSlots.set(['2026-05-19T12:00']);
+    preselectedSlots.set(['2026-05-19T12:00', '2026-05-19T12:15', '2026-05-19T12:30']);
+    fixture.detectChanges();
+
+    // Minute tick / focus / queue:updated reloads the queue from main.
+    pendingSlots.set(['2026-05-19T12:00']);
+    fixture.detectChanges();
+    pendingSlots.set([]);
+    fixture.detectChanges();
+
+    const all = ['2026-05-19T12:00', '2026-05-19T12:15', '2026-05-19T12:30'];
+    expect(component.selectedSlots()).toEqual(all);
+    expect(component.slotList().map(s => s.key)).toEqual(all);
+    const chips = fixture.nativeElement.querySelectorAll('[role="listbox"] button') as NodeListOf<HTMLButtonElement>;
+    expect(Array.from(chips).map(b => b.getAttribute('aria-selected'))).toEqual(['true', 'true', 'true']);
+  });
+
+  it('keeps a deselected non-queued slot visible so it can be selected again', () => {
+    pendingSlots.set(['2026-05-19T12:00']);
+    preselectedSlots.set(['2026-05-19T12:15']);
+    fixture.detectChanges();
+
+    component.toggle('2026-05-19T12:15');
+    pendingSlots.set(['2026-05-19T12:00']);
+    expect(component.selectedSlots()).toEqual([]);
+    expect(component.slotList().map(s => s.key)).toEqual(['2026-05-19T12:00', '2026-05-19T12:15']);
+
+    component.toggleAllSlots();
+    expect(component.selectedSlots()).toEqual(['2026-05-19T12:00', '2026-05-19T12:15']);
+  });
+
+  it('submits every selected slot even after the queue dropped them', async () => {
+    pendingSlots.set(['2026-05-19T12:00', '2026-05-19T12:15']);
+    preselectedSlots.set(['2026-05-19T12:00', '2026-05-19T12:15']);
+    fixture.detectChanges();
+    pendingSlots.set([]);
+    component.category.set('Projekt');
+    component.description.set('Arbejde');
+
+    await component.submit();
+
+    expect((ipcMock as any).submitPending).toHaveBeenCalledWith(['2026-05-19T12:00', '2026-05-19T12:15'], 'Arbejde', 'Projekt');
+  });
+
   it('searches Jira for non-Andet categories', fakeAsync(() => {
     component.category.set('Projekt');
     component.onDescriptionInput('TEAM');

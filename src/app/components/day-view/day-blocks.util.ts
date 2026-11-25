@@ -85,24 +85,17 @@ function rowMinutes(row: DayRowLike): number {
   return Number.isFinite(diff) && diff > 0 ? diff : 0;
 }
 
-/** Merges back-to-back slots with the same description/category (or consecutive gaps) into one block. */
-export function groupDayBlocks<T extends DayRowLike>(rows: readonly T[]): DayBlock<T>[] {
-  const blocks: DayBlock<T>[] = [];
-  for (const row of rows) {
-    const kind = row.missing ? 'missing' : 'entry';
-    const description = row.description ?? '';
-    const category = row.category ?? '';
-    const last = blocks[blocks.length - 1];
-    const sameContent = kind === 'missing' || (last?.description === description && last?.category === category);
-    if (last && last.kind === kind && last.end === row.start && sameContent) {
-      last.end = row.end;
-      last.minutes += rowMinutes(row);
-      last.rows.push(row);
-      continue;
-    }
-    blocks.push({ kind, start: row.start, end: row.end, minutes: rowMinutes(row), description, category, rows: [row] });
-  }
-  return blocks;
+/** One block per row: every interval (logged or missing) stays visible, even back-to-back repeats of a task. */
+export function toDayBlocks<T extends DayRowLike>(rows: readonly T[]): DayBlock<T>[] {
+  return rows.map(row => ({
+    kind: row.missing ? 'missing' : 'entry',
+    start: row.start,
+    end: row.end,
+    minutes: rowMinutes(row),
+    description: row.description ?? '',
+    category: row.category ?? '',
+    rows: [row]
+  }));
 }
 
 export interface CategoryTotal {

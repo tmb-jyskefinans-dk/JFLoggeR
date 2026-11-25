@@ -1,14 +1,14 @@
 import {
   categoryTotals,
-  groupDayBlocks,
   isoWeek,
   plannedMinutesForDay,
   shiftYmd,
-  splitJiraKey
+  splitJiraKey,
+  toDayBlocks
 } from '../../src/app/components/day-view/day-blocks.util';
 
 describe('day blocks util', () => {
-  test('merges back-to-back slots with identical content and consecutive gaps', () => {
+  test('keeps every interval as its own block, including repeated tasks and consecutive gaps', () => {
     const rows = [
       { start: '08:00', end: '08:15', description: 'ABC-1 - Fix', category: 'Dev' },
       { start: '08:15', end: '08:30', description: 'ABC-1 - Fix', category: 'Dev' },
@@ -17,14 +17,16 @@ describe('day blocks util', () => {
       { start: '09:00', end: '09:15', missing: true },
       { start: '09:30', end: '09:45', description: 'ABC-1 - Fix', category: 'Møde' }
     ];
-    const blocks = groupDayBlocks(rows);
+    const blocks = toDayBlocks(rows);
     expect(blocks.map(b => `${b.kind}:${b.start}-${b.end}:${b.minutes}`)).toEqual([
-      'entry:08:00-08:30:30',
+      'entry:08:00-08:15:15',
+      'entry:08:15-08:30:15',
       'entry:08:30-08:45:15',
-      'missing:08:45-09:15:30',
+      'missing:08:45-09:00:15',
+      'missing:09:00-09:15:15',
       'entry:09:30-09:45:15'
     ]);
-    expect(blocks[0].rows.length).toBe(2);
+    expect(blocks.every(b => b.rows.length === 1)).toBe(true);
   });
 
   test('category totals skip gaps and sort by time spent', () => {

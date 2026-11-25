@@ -718,6 +718,18 @@ electron_1.ipcMain.handle('db:save-settings', (_e, s) => {
     catch { }
     return { ok: true, settings: after };
 });
+electron_1.ipcMain.handle('app:get-version', () => {
+    if (electron_1.app.isPackaged)
+        return electron_1.app.getVersion();
+    // Unpackaged runs launch electron/.dist/main.js directly, so app.getVersion() reports Electron's own version.
+    try {
+        const pkg = JSON.parse(node_fs_1.default.readFileSync(node_path_1.default.join(__dirname, '../../package.json'), 'utf8'));
+        return typeof pkg?.version === 'string' ? pkg.version : electron_1.app.getVersion();
+    }
+    catch {
+        return electron_1.app.getVersion();
+    }
+});
 electron_1.ipcMain.handle('auth:get-status', () => auth_1.azureAuth.getStatus());
 electron_1.ipcMain.handle('auth:signin', async () => {
     const result = await auth_1.azureAuth.signInInteractive();

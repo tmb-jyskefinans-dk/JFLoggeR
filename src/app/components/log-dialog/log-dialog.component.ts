@@ -34,7 +34,13 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   manualError = signal('');
 
   showAll = false;
-  allSlots = this.ipc.pendingSlots;
+  selectedSlots = signal<string[]>([]);
+  // Slots requested for this dialog (e.g. from the day view) that main may never queue, such as the
+  // running slot or another day's. Kept so a pending-queue reload cannot drop them from the list.
+  private retainedSlots = signal<string[]>([]);
+  allSlots = computed(() =>
+    Array.from(new Set([...this.ipc.pendingSlots(), ...this.retainedSlots(), ...this.selectedSlots()])).sort()
+  );
   // Parsed slot objects for improved readability in template
   private weekdayNames = ['Søn','Man','Tir','Ons','Tor','Fre','Lør'];
   slotList = computed(() => this.allSlots().map(k => {
@@ -46,7 +52,6 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
   }));
   recent = this.ipc.recent;
 
-  selectedSlots = signal<string[]>([]);
   selectedDays = computed(() => {
     if (this.manualMode()) {
       const day = this.manualDate();
@@ -120,23 +125,22 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     const preselected = this.ipc.preselectedSlots();
     const promptSlot = this.ipc.lastPromptSlot ? this.ipc.lastPromptSlot() : null;
     if (preselected?.length) {
-      const selected = preselected.filter(s => list.includes(s));
-      if (selected.length) this.selectedSlots.set([...selected].sort());
-      else if (list.length) this.selectedSlots.set(list.slice(0, 1));
+      // Explicit requests (e.g. day view "Log") are honoured even if main has not queued them.
+      this.setSelection(preselected);
       this.ipc.preselectedSlots.set(null);
     } else if (this.ipc.bulkSelectAllFlag && this.ipc.bulkSelectAllFlag()) {
       // Bulk selection mode triggered from tray
-      this.selectedSlots.set([...list].sort());
+      this.setSelection(list);
       // Reset flag so future opens revert to normal selection heuristics
       this.ipc.bulkSelectAllFlag.set(false);
     } else {
       if (promptSlot && list.includes(promptSlot)) {
         // Prefer the slot that triggered the dialog
-        this.selectedSlots.set([promptSlot]);
+        this.setSelection([promptSlot]);
         this.prefillFromAdjacentPreviousSlot(promptSlot);
       } else if (list.length) {
         // Fallback: first pending slot
-        this.selectedSlots.set(list.slice(0, 1));
+        this.setSelection(list.slice(0, 1));
       }
     }
     this.ipc.loadRecent();
@@ -180,26 +184,28 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     this.submitFocusRetryHandle = setTimeout(() => this.focusSubmitWhenReady(attempt + 1), 50);
   }
 
+  /** Updates the selection, remembering every slot ever chosen so deselecting never hides it. */
+  private setSelection(slots: readonly string[]) {
+    const next = Array.from(new Set(slots)).sort();
+    this.retainedSlots.update(prev => Array.from(new Set([...prev, ...this.selectedSlots(), ...next])).sort());
+    this.selectedSlots.set(next);
+  }
+
   toggle(s: string) {
     if (this.dayLocked()) return;
     const set = new Set(this.selectedSlots());
     set.has(s) ? set.delete(s) : set.add(s);
-    this.selectedSlots.set(Array.from(set).sort());
+    this.setSelection(Array.from(set));
   }
   toggleAllSlots() {
     if (this.dayLocked()) return;
-    if (this.allSelected()) {
-      this.selectedSlots.set([]);
-    } else {
-      // Copy in case pendingSlots is a signal that may mutate externally
-      this.selectedSlots.set([...this.allSlots()].sort());
-    }
+    this.setSelection(this.allSelected() ? [] : this.allSlots());
   }
   remove(i: number) {
     if (this.dayLocked()) return;
     const next = [...this.selectedSlots()];
     next.splice(i, 1);
-    this.selectedSlots.set(next);
+    this.setSelection(next);
   }
   applyPreset(v: string) {
     if (!v) return;
@@ -483,7 +489,7 @@ export class LogDialogComponent implements OnInit, AfterViewInit, OnDestroy {
     // Preserve user multi-selection while dialog is open. Only auto-apply prompt slot
     // when there is no active selection (initial open/race recovery).
     if (pending.includes(ps) && currentSel.length === 0) {
-      this.selectedSlots.set([ps]);
+      this.setSelection([ps]);
       this.prefillFromAdjacentPreviousSlot(ps);
     }
   });

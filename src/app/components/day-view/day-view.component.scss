@@ -66,3 +66,21 @@
 }
 .day-block:hover .day-block-delete { opacity: 1; }
 :host-context(.dark) .day-block-delete:hover { background: rgb(136 19 55 / 0.3); color: rgb(251 113 133); }
+
+// Keyboard/pointer alternative to double-clicking the description.
+.day-block-action {
+  align-self: flex-start;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  color: rgb(var(--slate-600));
+  transition: color 0.15s ease, background-color 0.15s ease;
+
+  &:hover { color: rgb(var(--slate-900)); background: rgb(var(--slate-100)); }
+  &:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+}
+:host-context(.dark) .day-block-action { color: rgb(var(--slate-300)); &:hover { color: white; background: rgb(var(--slate-700)); } }

@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('workApi', {
   setExternalLogged: (day: string, exported: boolean) => ipcRenderer.invoke('db:set-external-logged', day, exported),
   importExternal: (raw: string) => ipcRenderer.invoke('db:import-external', raw),
   getFlexBalance: () => ipcRenderer.invoke('stats:flex-balance'),
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
 
   // Backlog queue
   getPendingSlots: () => ipcRenderer.invoke('queue:get'),

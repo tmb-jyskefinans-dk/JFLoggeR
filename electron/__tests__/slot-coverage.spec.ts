@@ -1,5 +1,5 @@
 import { uncoveredRanges } from '../coverage';
-import { missingRowsForDay, groupDayBlocks } from '../../src/app/components/day-view/day-blocks.util';
+import { missingRowsForDay, toDayBlocks } from '../../src/app/components/day-view/day-blocks.util';
 
 const e = (start: string, end: string) => ({ start, end, description: 'x', category: 'y' });
 
@@ -16,10 +16,11 @@ describe('slot coverage with leftovers from another slot length', () => {
     const entries = [e('11:05', '11:06'), e('12:15', '12:45'), e('12:45', '12:49')];
     const rows = missingRowsForDay(entries, settings, '2026-10-28', 13 * 60);
 
-    const blocks = groupDayBlocks([...entries, ...rows].sort((a, b) => a.start.localeCompare(b.start)))
+    const blocks = toDayBlocks([...entries, ...rows].sort((a, b) => a.start.localeCompare(b.start)))
       .filter(b => b.kind === 'missing')
       .map(b => `${b.start}-${b.end}`);
-    expect(blocks).toEqual(['11:00-11:05', '11:06-12:15', '12:49-13:00']);
+    // Each missing interval is listed on its own so the user sees exactly which slots are missing.
+    expect(blocks).toEqual(['11:00-11:05', '11:06-11:15', '11:15-11:30', '11:30-11:45', '11:45-12:00', '12:00-12:15', '12:49-13:00']);
 
     // Gaps keep their grid slot as the log key, so logging uses normal pending slots.
     expect(rows.find(r => r.start === '12:49')?.slotStart).toBe('12:45');
